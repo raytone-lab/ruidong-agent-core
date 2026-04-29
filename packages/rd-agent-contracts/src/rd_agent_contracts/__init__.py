@@ -23,6 +23,14 @@ from .ids import (
     UuidIdGenerator,
 )
 from .messages import Message, Role, ToolCall, ToolResult
+from .ports import (
+    BlobWriter,
+    BudgetGate,
+    CancellationToken,
+    EventSink,
+    Meter,
+    PolicyGate,
+)
 from .provider_lock import ProviderLock
 from .usage import Usage, normalize_usage
 
@@ -34,10 +42,16 @@ __all__ = [
     "ActionId",
     "AgentEvent",
     "BlobRef",
+    "BlobWriter",
     "BudgetEnvelope",
+    "BudgetGate",
+    "CancellationToken",
+    "EventSink",
     "IdGenerator",
     "Message",
     "MessageId",
+    "Meter",
+    "PolicyGate",
     "ProviderLock",
     "Role",
     "RunId",
