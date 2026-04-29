@@ -11,6 +11,7 @@
 from .blob import BlobRef
 from .budget import BudgetEnvelope
 from .enums import StopReason, ToolCallStatus
+from .events import AgentEvent
 from .ids import (
     ActionId,
     IdGenerator,
@@ -31,6 +32,7 @@ SCHEMA_VERSION = "1.0.0"
 __all__ = [
     "SCHEMA_VERSION",
     "ActionId",
+    "AgentEvent",
     "BlobRef",
     "BudgetEnvelope",
     "IdGenerator",
