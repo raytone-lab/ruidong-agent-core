@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+
+# uv
+.venv/
+uv.lock
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+
+# Phase A 录制产物
+traces/
+*.jsonl.gz
