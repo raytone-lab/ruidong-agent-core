@@ -7,6 +7,13 @@ dependencies = [
     "rd-agent-contracts",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.5",
+]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

@@ -3,7 +3,8 @@
 包含：
 - ID 类型与生成器
 - Message / ToolCall / ToolResult / AgentEvent 等 dataclass
-- 横切 ports protocol（EventSink / Meter / BudgetGate / PolicyGate / CancellationToken / BlobWriter / Clock / IdGenerator）
+- 横切 ports protocol（EventSink / Meter / BudgetGate / PolicyGate /
+  CancellationToken / BlobWriter / Clock / IdGenerator）
 - schema_version = "1.0.0"
 """
 

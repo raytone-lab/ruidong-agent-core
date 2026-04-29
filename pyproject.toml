@@ -3,6 +3,11 @@ name = "ruidong-agent-core-workspace"
 version = "0.0.0"
 description = "Agent Runtime PaaS monorepo workspace root (not published)"
 requires-python = ">=3.12"
+dependencies = [
+    "rd-agent-contracts",
+    "rd-llm-gateway",
+    "rd-replay-evals",
+]
 
 [tool.uv.workspace]
 members = ["packages/*"]
@@ -11,6 +16,13 @@ members = ["packages/*"]
 rd-agent-contracts = { workspace = true }
 rd-llm-gateway = { workspace = true }
 rd-replay-evals = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.5",
+]
 
 [tool.ruff]
 line-length = 100
@@ -23,3 +35,5 @@ select = ["E", "F", "I", "B", "UP", "N"]
 testpaths = ["packages/*/tests"]
 python_files = ["test_*.py"]
 asyncio_mode = "auto"
+# importlib 模式让相同文件名（如 test_smoke.py）在不同 tests/ 目录下不冲突
+addopts = "--import-mode=importlib"
