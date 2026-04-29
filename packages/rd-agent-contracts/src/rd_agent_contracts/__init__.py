@@ -8,6 +8,7 @@
 - schema_version = "1.0.0"
 """
 
+from .blob import BlobRef
 from .enums import StopReason, ToolCallStatus
 from .ids import (
     ActionId,
@@ -28,6 +29,7 @@ SCHEMA_VERSION = "1.0.0"
 __all__ = [
     "SCHEMA_VERSION",
     "ActionId",
+    "BlobRef",
     "IdGenerator",
     "Message",
     "MessageId",
