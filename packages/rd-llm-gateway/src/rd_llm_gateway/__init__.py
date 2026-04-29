@@ -1,5 +1,6 @@
 """rd-llm-gateway — LLMProvider + adapters + stream chunk normalizer。"""
 
+from .normalizer import StreamNormalizer
 from .ports import LLMProvider
 from .types import ChatRequest, StreamChunk, StreamChunkType
 
@@ -10,4 +11,5 @@ __all__ = [
     "LLMProvider",
     "StreamChunk",
     "StreamChunkType",
+    "StreamNormalizer",
 ]
