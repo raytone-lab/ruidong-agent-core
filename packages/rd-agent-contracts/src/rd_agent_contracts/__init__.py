@@ -22,6 +22,7 @@ from .ids import (
     UuidIdGenerator,
 )
 from .messages import Message, Role, ToolCall, ToolResult
+from .provider_lock import ProviderLock
 from .usage import Usage, normalize_usage
 
 __version__ = "1.0.0"
@@ -35,6 +36,7 @@ __all__ = [
     "IdGenerator",
     "Message",
     "MessageId",
+    "ProviderLock",
     "Role",
     "RunId",
     "SessionId",
