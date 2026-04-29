@@ -8,6 +8,7 @@
 - schema_version = "1.0.0"
 """
 
+from .enums import StopReason, ToolCallStatus
 from .ids import (
     ActionId,
     IdGenerator,
@@ -29,6 +30,8 @@ __all__ = [
     "MessageId",
     "RunId",
     "SessionId",
+    "StopReason",
+    "ToolCallStatus",
     "ToolUseId",
     "TurnId",
     "UuidIdGenerator",
