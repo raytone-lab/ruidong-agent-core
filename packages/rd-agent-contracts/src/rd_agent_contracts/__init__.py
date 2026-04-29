@@ -10,6 +10,7 @@
 
 from .blob import BlobRef
 from .budget import BudgetEnvelope
+from .clock import Clock, FrozenClock, SystemClock
 from .enums import StopReason, ToolCallStatus
 from .events import AgentEvent
 from .ids import (
@@ -46,7 +47,9 @@ __all__ = [
     "BudgetEnvelope",
     "BudgetGate",
     "CancellationToken",
+    "Clock",
     "EventSink",
+    "FrozenClock",
     "IdGenerator",
     "Message",
     "MessageId",
@@ -57,6 +60,7 @@ __all__ = [
     "RunId",
     "SessionId",
     "StopReason",
+    "SystemClock",
     "ToolCall",
     "ToolCallStatus",
     "ToolResult",
