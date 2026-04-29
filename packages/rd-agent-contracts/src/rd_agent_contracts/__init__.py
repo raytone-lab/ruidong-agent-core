@@ -9,6 +9,7 @@
 """
 
 from .blob import BlobRef
+from .budget import BudgetEnvelope
 from .enums import StopReason, ToolCallStatus
 from .ids import (
     ActionId,
@@ -30,6 +31,7 @@ __all__ = [
     "SCHEMA_VERSION",
     "ActionId",
     "BlobRef",
+    "BudgetEnvelope",
     "IdGenerator",
     "Message",
     "MessageId",
