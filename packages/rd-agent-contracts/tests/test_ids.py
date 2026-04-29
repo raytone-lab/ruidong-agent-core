@@ -1,16 +1,7 @@
 """验证 ID 类型 + IdGenerator protocol 行为。"""
 import re
-import uuid
 
-from rd_agent_contracts.ids import (
-    RunId,
-    TurnId,
-    MessageId,
-    ActionId,
-    ToolUseId,
-    SessionId,
-    UuidIdGenerator,
-)
+from rd_agent_contracts.ids import RunId, UuidIdGenerator
 
 
 def test_id_types_are_str_subclass():

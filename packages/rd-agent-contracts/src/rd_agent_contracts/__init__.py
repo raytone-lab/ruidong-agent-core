@@ -8,10 +8,28 @@
 - schema_version = "1.0.0"
 """
 
+from .ids import (
+    ActionId,
+    IdGenerator,
+    MessageId,
+    RunId,
+    SessionId,
+    ToolUseId,
+    TurnId,
+    UuidIdGenerator,
+)
+
 __version__ = "1.0.0"
 SCHEMA_VERSION = "1.0.0"
 
-from rd_agent_contracts.ids import (
-    RunId, TurnId, MessageId, ActionId, ToolUseId, SessionId,
-    IdGenerator, UuidIdGenerator,
-)
+__all__ = [
+    "SCHEMA_VERSION",
+    "ActionId",
+    "IdGenerator",
+    "MessageId",
+    "RunId",
+    "SessionId",
+    "ToolUseId",
+    "TurnId",
+    "UuidIdGenerator",
+]
