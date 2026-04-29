@@ -19,6 +19,7 @@ from .ids import (
     TurnId,
     UuidIdGenerator,
 )
+from .messages import Message, Role, ToolCall, ToolResult
 
 __version__ = "1.0.0"
 SCHEMA_VERSION = "1.0.0"
@@ -27,11 +28,15 @@ __all__ = [
     "SCHEMA_VERSION",
     "ActionId",
     "IdGenerator",
+    "Message",
     "MessageId",
+    "Role",
     "RunId",
     "SessionId",
     "StopReason",
+    "ToolCall",
     "ToolCallStatus",
+    "ToolResult",
     "ToolUseId",
     "TurnId",
     "UuidIdGenerator",
