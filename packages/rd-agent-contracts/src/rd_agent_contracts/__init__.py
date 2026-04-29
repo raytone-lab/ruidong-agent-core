@@ -20,6 +20,7 @@ from .ids import (
     UuidIdGenerator,
 )
 from .messages import Message, Role, ToolCall, ToolResult
+from .usage import Usage, normalize_usage
 
 __version__ = "1.0.0"
 SCHEMA_VERSION = "1.0.0"
@@ -39,5 +40,7 @@ __all__ = [
     "ToolResult",
     "ToolUseId",
     "TurnId",
+    "Usage",
     "UuidIdGenerator",
+    "normalize_usage",
 ]
