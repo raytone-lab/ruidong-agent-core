@@ -231,24 +231,97 @@ Phase A 已完成（tag phase-a-complete，commit 5ace0e3）。
 
 **意思**：前端能传 reasoning_effort，后端默默丢弃。**用户主观感觉"我选了 Ultrathink 应该更深思考"，实际效果跟 Think 一样**。
 
-### Phase B 解决方案候选
+### MODEL-ADAPTER spec v8 是否兼容此功能？
 
-可作为 **Phase B warm-up task**（在大动作之前 + 立竿见影）：
+**设计层面：✅ 完全设计了**
+- `ThinkingExtractionConfig.budget_tokens: int | None`（capabilities.py:16，spec §4.2）
+- `AnthropicNativeAdapter.build_request` 伪代码已写（spec 行 1433-1437）：
+  ```python
+  if profile.capabilities.thinking.mode == "anthropic_block" 
+     and profile.capabilities.thinking.budget_tokens:
+      body["thinking"] = {
+          "type": "enabled",
+          "budget_tokens": profile.capabilities.thinking.budget_tokens,
+      }
+  ```
+- ReasoningEffort enum 4 档已定义在 API 层
+
+**实现层面：❌ 三个 gap**
+
+1. **`OpenAICompatAdapter.build_request` 不传 thinking budget**
+   - 现状：completely 不看 `capabilities.thinking`
+   - 但根本问题：**OpenAI chat/completions 协议本身没有 budget_tokens 字段**
+   - Replacement：OpenAI o1/o3 用 `reasoning_effort: "low"|"medium"|"high"`（档位不是 token 数）
+   - DeepSeek / Kimi / GLM-Zero 完全没文档支持 budget 控制
+
+2. **`AnthropicNativeAdapter` 未实现**
+   - `model_adapter/` 目录只有 `openai_compat.py`
+   - spec 标"阶段 2 PoC 草图"
+   - **只有 anthropic_native 才能真正传 `thinking.budget_tokens`**
+
+3. **ReasoningEffort enum → ThinkingExtractionConfig 映射不存在**
+   - 4 档 → budget_tokens 数值 / o1 reasoning_effort 档位的映射函数空白
+
+### 完整修复路径（Phase B 时做）
 
 ```
-W1: model_adapter 加 thinking budget pass-through
-  - capabilities.py: ThinkingExtractionConfig 加 budget_tokens 真消费
-  - openai_compat.py: build_request 根据 capabilities.thinking 传参数
-  - 新建 anthropic_native.py adapter（ThinkingExtractionConfig.mode == "anthropic_block"）
-  - reasoning_effort enum → ThinkingExtractionConfig 的映射函数
-  - codesphere executor 把 ActProxyRequest.reasoning_effort 透传到 model_profile
-  - 集成测试：4 档 reasoning_effort → 4 档 budget_tokens 真到达 provider
+Step 1: 实现 AnthropicNativeAdapter（spec §4.1.1 + 行 1300-1500 伪代码）
+        ~150 行代码
+
+Step 2: 加 ReasoningEffort 映射函数
+        THINK         → budget_tokens=2000  (or mode="none")
+        THINK_HARD    → budget_tokens=5000
+        THINK_HARDER  → budget_tokens=10000
+        ULTRATHINK    → budget_tokens=24000
+
+Step 3: ResolvedModelProfile 支持 per-request budget_tokens override
+        （capabilities 当前是 per-model 静态，需要 per-request 动态覆盖）
+
+Step 4: executor 链路 wire reasoning_effort：
+        ActProxyRequest.reasoning_effort
+          → ResolvedModelProfile.capabilities.thinking.budget_tokens
+          → AnthropicNativeAdapter.build_request body.thinking
+
+Step 5: codesphere model_channels 表里 Claude 系列加
+        anthropic_native_base_url（OpenRouter Anthropic-direct 或自建网关）
+
+Step 6: 适配器选择逻辑：当 reasoning_effort 非 None 且模型支持
+        anthropic_block thinking 时，自动切到 AnthropicNativeAdapter
+        （否则 fallback 到 OpenAICompatAdapter）
+
+Step 7: OpenAI o1/o3 单独支持 reasoning_effort 透传（独立 task，
+        不依赖 budget_tokens 路径）
 ```
 
-**这个 warm-up 的价值**：
-- 修复线上 P0 级体验缺陷（"用户付费选了 Ultrathink，没生效"）
-- 验证 model_adapter 改造路径（移植到新仓库前先在 codesphere 内迭代一次）
-- 给 Phase B "model_adapter v2" 启动一个小切口热身
+### 简化版快速修复（仅 Claude 生效，1-2 天）
+
+```
+W1: 实现最小 AnthropicNativeAdapter（仅支持 thinking + 普通 text + tool_use）
+W2: ReasoningEffort enum → budget_tokens 映射 + executor wire
+W3: saas-test 灰度验证 4 档真生效
+```
+
+工作量评估：**~150 行 adapter + 50 行 executor 改 + 30 行测试**。
+
+**这个修复的价值**：
+- 修复线上 P0 级体验缺陷（"用户付费选了 Ultrathink，等同 Think"）
+- 验证 model_adapter v8 spec 落地路径
+- 让 Phase B "移植 model_adapter v2 到新仓库" 时少一个未实现的 adapter
+
+### Phase B 启动决策树更新（含 thinking budget）
+
+```
+Phase B 启动选项：
+A. 移植 model_adapter → rd-llm-gateway v2（最稳，但工作量大）
+B. 抽 P5 engine（依赖 v2 形态稳定）
+C. 先做 P8 orchestration
+D. (新) Warm-up: 实现 AnthropicNativeAdapter + thinking budget 链路
+   → 修复用户付费体验缺陷
+   → 完整化 model_adapter（让它从"OpenAI compat 单 adapter" 进化到"多 adapter"）
+   → 然后再走 A
+```
+
+推荐路径：**D → A → B**。先修线上看得见的缺陷 + 让 model_adapter 完整化（多 adapter），再做架构搬家，最后抽 engine。
 
 **Phase B 启动决策树更新**：
 
