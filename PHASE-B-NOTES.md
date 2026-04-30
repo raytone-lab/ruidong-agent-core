@@ -209,6 +209,62 @@ Phase A 已完成（tag phase-a-complete，commit 5ace0e3）。
 
 ---
 
+## 已识别的"占位字段"债（Phase B 可顺手清的）
+
+调研 2026-04-30 发现：
+
+### 思考配额 (thinking budget) — 当前完全无效
+
+**两个字段都是死代码**：
+
+1. `app/api/codesphere/project.py:152` 定义 `ReasoningEffort` enum（Think / Think Hard / Think Harder / Ultrathink）
+   - `ActProxyRequest.reasoning_effort` 字段公开给 API 客户端
+   - **`grep services/ reasoning_effort` 零结果**——服务端完全不消费
+
+2. `app/services/agent_runner/model_adapter/capabilities.py:16` 定义 `ThinkingExtractionConfig.budget_tokens: int | None`
+   - **`grep budget_tokens` 仅这一处**——从未被读取
+
+3. `model_adapter/openai_compat.py` 的 `build_request` 不传任何 thinking 相关参数到 LLM
+   - Anthropic 原生 `thinking={"type":"enabled","budget_tokens":N}` 没接
+   - OpenAI o1/o3 `reasoning_effort` 参数没接
+   - DeepSeek/Kimi reasoning_content 配置没接
+
+**意思**：前端能传 reasoning_effort，后端默默丢弃。**用户主观感觉"我选了 Ultrathink 应该更深思考"，实际效果跟 Think 一样**。
+
+### Phase B 解决方案候选
+
+可作为 **Phase B warm-up task**（在大动作之前 + 立竿见影）：
+
+```
+W1: model_adapter 加 thinking budget pass-through
+  - capabilities.py: ThinkingExtractionConfig 加 budget_tokens 真消费
+  - openai_compat.py: build_request 根据 capabilities.thinking 传参数
+  - 新建 anthropic_native.py adapter（ThinkingExtractionConfig.mode == "anthropic_block"）
+  - reasoning_effort enum → ThinkingExtractionConfig 的映射函数
+  - codesphere executor 把 ActProxyRequest.reasoning_effort 透传到 model_profile
+  - 集成测试：4 档 reasoning_effort → 4 档 budget_tokens 真到达 provider
+```
+
+**这个 warm-up 的价值**：
+- 修复线上 P0 级体验缺陷（"用户付费选了 Ultrathink，没生效"）
+- 验证 model_adapter 改造路径（移植到新仓库前先在 codesphere 内迭代一次）
+- 给 Phase B "model_adapter v2" 启动一个小切口热身
+
+**Phase B 启动决策树更新**：
+
+```
+Phase B 第一刀候选：
+A. 移植 model_adapter → rd-llm-gateway v2（之前推荐）
+B. 抽 P5 engine
+C. 先做 P8 orchestration
+D. (新) Warm-up: thinking budget pass-through 修死代码
+   → 然后再走 A
+```
+
+推荐路径：**D → A → B**。先修线上看得见的缺陷，再做架构搬家，最后抽 engine。
+
+---
+
 ## 关键文件路径速查
 
 | 路径 | 用途 |
