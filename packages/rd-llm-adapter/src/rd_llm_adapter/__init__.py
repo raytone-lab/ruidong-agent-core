@@ -1,7 +1,10 @@
 """Model adapter primitives used by the AgentRunner LLM boundary."""
 
-from .anthropic_native import AnthropicNativeAdapter, AnthropicNativeParserSession
+__version__ = "1.0.1"
+
+from .anthropic_native import AnthropicNativeAdapter
 from .anthropic_transport import AnthropicNativeTransport
+from .base import StreamParserSession, Transport
 from .capabilities import ModelCapabilities, ProtocolLimits, ThinkingExtractionConfig
 from .events import (
     ReasoningDelta,
@@ -14,7 +17,7 @@ from .events import (
     TurnDone,
     UsageUpdate,
 )
-from .openai_compat import OpenAICompatAdapter, OpenAICompatParserSession
+from .openai_compat import OpenAICompatAdapter
 from .recorder import RecordedTurn, ReplayEvents, StreamRecorder
 from .registry import (
     AdapterNotSupportedError,
@@ -31,14 +34,14 @@ from .transports import OpenAICompatTransport
 __all__ = [
     "AdapterNotSupportedError",
     "AnthropicNativeAdapter",
-    "AnthropicNativeParserSession",
     "AnthropicNativeTransport",
     "OpenAICompatAdapter",
-    "OpenAICompatParserSession",
     "OpenAICompatTransport",
     "RecordedTurn",
     "ReplayEvents",
+    "StreamParserSession",
     "StreamRecorder",
+    "Transport",
     "TransportNotSupportedError",
     "resolve_adapter",
     "resolve_adapter_for_profile",
