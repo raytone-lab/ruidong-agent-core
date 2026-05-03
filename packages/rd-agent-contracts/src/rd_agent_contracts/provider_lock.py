@@ -16,9 +16,13 @@ class ProviderLock:
     locked_at_run_id: str
 
     def is_compatible_with(
-        self, adapter_family: str, tool_protocol: str
+        self,
+        adapter_family: str,
+        tool_protocol: str,
+        reasoning_protocol: str | None = None,
     ) -> bool:
         return (
             self.adapter_family == adapter_family
             and self.tool_protocol == tool_protocol
+            and self.reasoning_protocol == reasoning_protocol
         )

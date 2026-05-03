@@ -34,8 +34,15 @@ def test_provider_lock_compatible_adapter():
         locked_at_run_id="run_123",
     )
     assert lock.is_compatible_with(
-        adapter_family="anthropic", tool_protocol="anthropic_tool_use"
+        adapter_family="anthropic",
+        tool_protocol="anthropic_tool_use",
+        reasoning_protocol="anthropic_thinking",
     )
     assert not lock.is_compatible_with(
         adapter_family="openai_compat", tool_protocol="openai_tool_calls"
+    )
+    assert not lock.is_compatible_with(
+        adapter_family="anthropic",
+        tool_protocol="anthropic_tool_use",
+        reasoning_protocol=None,
     )
