@@ -1,0 +1,35 @@
+"""AgentEvent — engine 与外部之间的统一事件 envelope。
+
+强约束：
+- seq 单调递增（>=1），P2 normalizer 拒绝乱序
+- schema_version 默认 canonical（1.0.0），边界 adapter 做 up/down grade
+- payload 任意 JSON 兼容 dict
+"""
+from __future__ import annotations
+
+from dataclasses import asdict, dataclass, field
+from typing import Any
+
+# 与 __init__.py 的 SCHEMA_VERSION 同值；放本地常量避免循环 import。
+# 未来若提取独立 schema 模块，可统一来源。
+_DEFAULT_SCHEMA_VERSION = "1.0.0"
+
+
+@dataclass(frozen=True)
+class AgentEvent:
+    seq: int
+    timestamp_ms: int
+    run_id: str
+    turn_id: str
+    event_type: str
+    payload: dict[str, Any]
+    schema_version: str = field(default=_DEFAULT_SCHEMA_VERSION)
+    message_id: str | None = None
+    action_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.seq < 1:
+            raise ValueError(f"seq must be >= 1, got {self.seq}")
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)

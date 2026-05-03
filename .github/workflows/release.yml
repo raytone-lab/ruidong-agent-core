@@ -1,0 +1,63 @@
+name: Release
+
+# 触发：tag 格式 rd-<package-name>-v<version>
+# 例: rd-agent-contracts-v1.0.0
+on:
+  push:
+    tags:
+      - "rd-*-v*"
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Parse package name from tag
+        id: parse
+        run: |
+          # tag 格式：rd-<name>-v<version>
+          # 例 rd-agent-contracts-v1.0.0 → pkg=rd-agent-contracts, version=1.0.0
+          TAG="${GITHUB_REF#refs/tags/}"
+          PKG=$(echo "$TAG" | sed -E 's/^(rd-.+)-v[0-9].+$/\1/')
+          VERSION=$(echo "$TAG" | sed -E 's/^.+-v([0-9].+)$/\1/')
+          echo "pkg=$PKG" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Parsed: pkg=$PKG, version=$VERSION"
+
+      - name: Verify package exists
+        run: |
+          test -d "packages/${{ steps.parse.outputs.pkg }}" || {
+            echo "Package directory packages/${{ steps.parse.outputs.pkg }} not found"
+            exit 1
+          }
+
+      - name: Build wheel
+        run: |
+          # uv workspace: 从 package 子目录跑 uv build，wheel 输出到 workspace root 的 dist/
+          cd "packages/${{ steps.parse.outputs.pkg }}"
+          uv build --wheel
+          ls -la ../../dist/
+
+      - name: Create release + upload wheel
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # 找出本次 build 的 wheel（按 package name 过滤，避免误传同 dist 目录里其他 pkg 的 wheel）
+          PKG_UNDERSCORED=$(echo "${{ steps.parse.outputs.pkg }}" | tr '-' '_')
+          WHEEL=$(ls dist/${PKG_UNDERSCORED}-${{ steps.parse.outputs.version }}-*.whl)
+          test -f "$WHEEL" || { echo "Wheel not found: $WHEEL"; exit 1; }
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --notes "Auto-built wheel for ${{ steps.parse.outputs.pkg }} v${{ steps.parse.outputs.version }}" \
+            "$WHEEL"
