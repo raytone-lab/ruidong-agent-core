@@ -1004,6 +1004,22 @@ class ResolvedModelProfile:
 
 ## 5. ModelAdapter 接口
 
+> ⚠️ **STALE 警告（2026-05-03，Phase B-1 ship 后）**：
+>
+> 本节定义的 `ModelAdapter` Protocol（`build_request(messages, tools, profile, system_prompt)`）
+> **与实际 shipped 的 OpenAICompatAdapter / AnthropicNativeAdapter 签名不一致**。这两个具体类的
+> `build_request` 因为 OpenAI Responses API（reasoning_effort 字符串档）和 Anthropic Messages API
+> （thinking.budget_tokens 整数）协议本身不同，没有共通签名可以抽。
+>
+> **当前 rd-llm-adapter 1.0.0 公开 API**：只暴露 `Transport` + `StreamParserSession` 两个 Protocol，
+> 不暴露 `Adapter` 抽象。依赖具体类（OpenAICompatAdapter / AnthropicNativeAdapter）+ `adapter_kind`
+> 字符串识别。原因：现有调用方（codesphere-saas）已 isinstance 分支，没有迫切的 Protocol 痛点；
+> Adapter 抽象设计要等 B-3 engine 抽出后基于 `TurnRequest` 中间态定义。
+>
+> 本节中的 `StreamParserSession` 接口与实际 shipped 一致，仍然权威。
+>
+> 本节中 `ModelAdapter` Protocol 应**作为历史设计参考**阅读，**不要按它实现新 adapter**。
+
 ### 5.1 核心接口（拆分后）
 
 **Codex 反馈**：原 `call_stream()` 把 HTTP/SDK 调用和事件解析混在一起，测试难做。拆开。

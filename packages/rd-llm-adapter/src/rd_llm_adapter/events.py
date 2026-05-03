@@ -1,3 +1,26 @@
+"""StandardEvent 9 类的数据契约。
+
+**ToolCall 事件 lifecycle 约束**（B-1 ship 后明确）：
+
+调用方在一个 turn 中按以下顺序消费 ToolCall 事件：
+
+1. `ToolCallStart(index, call_id?, name?, encoding_hint?)` — 一个 tool call 开启
+   - 已知 call_id/name 时 adapter 应在 ToolCallStart 中带上，避免后续 *Delta 重复发
+   - 未知时 adapter 留空，等后续 *IdDelta / *NameDelta 增量补
+2. 0 或多个 `ToolCallIdDelta` / `ToolCallNameDelta` / `ToolCallArgsDelta` — 增量元信息
+   - **目标约束**（rd-llm-adapter 1.0.1 起声明，B-3 收紧）：*Delta 仅在对应字段在 ToolCallStart
+     时未知（None）时才应发出
+   - **当前现状**：OpenAICompatAdapter 在 ToolCallStart 已给 call_id 时仍可能发出
+     ToolCallIdDelta（见 openai_compat.py:285-287）。这是已知冗余，消费方应对此容忍。
+     B-3 抽 engine 时通过 TurnRequest 抽象统一收紧
+3. `ToolCallEnd(call_id, name, index, encoding, raw_args, parsed_input, parse_error)`
+   — tool call 结束
+
+**ToolCallEnd 字段冗余说明**：`raw_args` / `parsed_input` / `parse_error` 与 TurnDone.content 中
+最终的 ToolUseBlock / InvalidToolCall 字段重叠（同一信息的两个表达）。当前为了流式消费方便保留双
+重表达；B-3 抽 engine 时统一让 TurnDone.content 作为唯一 truth，*Delta 仅承担流式 lifecycle 信号。
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -19,6 +42,9 @@ class ReasoningDelta:
 
 @dataclass(frozen=True)
 class ToolCallStart:
+    """Tool call lifecycle 起始事件。call_id/name 已知时应在此事件带上，
+    避免后续 *IdDelta / *NameDelta 发出重复信息。详见模块 docstring。"""
+
     index: int
     call_id: str | None = None
     name: str | None = None
@@ -47,6 +73,12 @@ class ToolCallArgsDelta:
 
 @dataclass(frozen=True)
 class ToolCallEnd:
+    """Tool call lifecycle 结束事件。
+
+    raw_args / parsed_input / parse_error 与 TurnDone.content 终态 ToolUseBlock /
+    InvalidToolCall 字段冗余（同一信息双重表达）；当前保留为流式消费方便，B-3 收紧。
+    """
+
     call_id: str
     name: str
     index: int
@@ -80,6 +112,20 @@ class UsageUpdate:
 
 @dataclass(frozen=True)
 class TurnDone:
+    """Turn 完成的终态聚合。
+
+    `content` 是有序的 transcript truth（TextBlock / ReasoningBlock / ToolUseBlock /
+    InvalidToolCall 按 provider 实际产出顺序排列）。
+
+    `text_blocks` / `reasoning_blocks` / `tool_calls` / `invalid_tool_calls` 是 `content`
+    的 **derived 视图**（按类型过滤的快捷访问），不是独立 truth。两者不一致时以 `content`
+    为准。当前为流式/历史消费方便保留独立字段，**新代码应优先消费 `content`**；B-3 抽 engine
+    时这些 derived 字段会移除或改 property。
+
+    测试合约（rd-llm-adapter 1.0.1+ 强制）：所有 adapter emit 的 TurnDone，derived 字段必须
+    可由 content 通过简单过滤完整重建——见 `tests/test_turn_done_derived_consistency.py`。
+    """
+
     stop_reason: str
     content: list[Any]
     text_blocks: list[Any]
