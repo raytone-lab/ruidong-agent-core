@@ -38,6 +38,7 @@ from .transcript_blocks import (
     ProviderState,
     ReasoningBlock,
     StandardContentBlock,
+    StandardToolCall,
     TextBlock,
     ToolUseBlock,
 )
@@ -71,6 +72,7 @@ __all__ = [
     "RunId",
     "SessionId",
     "StandardContentBlock",
+    "StandardToolCall",
     "StopReason",
     "SystemClock",
     "TextBlock",
