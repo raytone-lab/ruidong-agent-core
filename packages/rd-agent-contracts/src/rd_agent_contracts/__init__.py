@@ -5,7 +5,8 @@
 - Message / ToolCall / ToolResult / AgentEvent 等 dataclass
 - 横切 ports protocol（EventSink / Meter / BudgetGate / PolicyGate /
   CancellationToken / BlobWriter / Clock / IdGenerator）
-- schema_version = "1.0.0"
+- __version__：包发版号（跟 pyproject.toml 同步）
+- SCHEMA_VERSION：data contract schema 版本，仅在 contract 字段/类型有 breaking change 时 bump
 """
 
 from .blob import BlobRef
@@ -44,8 +45,8 @@ from .transcript_blocks import (
 )
 from .usage import Usage, normalize_usage
 
-__version__ = "1.0.0"
-SCHEMA_VERSION = "1.0.0"
+__version__ = "1.3.0"
+SCHEMA_VERSION = "1.2.0"
 
 __all__ = [
     "SCHEMA_VERSION",

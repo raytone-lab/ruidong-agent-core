@@ -2,7 +2,7 @@
 
 强约束：
 - seq 单调递增（>=1），P2 normalizer 拒绝乱序
-- schema_version 默认 canonical（1.0.0），边界 adapter 做 up/down grade
+- schema_version 默认 canonical（与 __init__.SCHEMA_VERSION 同值），边界 adapter 做 up/down grade
 - payload 任意 JSON 兼容 dict
 """
 from __future__ import annotations
@@ -11,8 +11,8 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 # 与 __init__.py 的 SCHEMA_VERSION 同值；放本地常量避免循环 import。
-# 未来若提取独立 schema 模块，可统一来源。
-_DEFAULT_SCHEMA_VERSION = "1.0.0"
+# 升级 SCHEMA_VERSION 时**必须**同步本常量——否则新创建的 AgentEvent 会带 stale 版本号。
+_DEFAULT_SCHEMA_VERSION = "1.2.0"
 
 
 @dataclass(frozen=True)
