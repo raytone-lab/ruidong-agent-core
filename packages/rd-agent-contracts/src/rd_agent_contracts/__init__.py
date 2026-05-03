@@ -33,6 +33,14 @@ from .ports import (
     PolicyGate,
 )
 from .provider_lock import ProviderLock
+from .transcript_blocks import (
+    InvalidToolCall,
+    ProviderState,
+    ReasoningBlock,
+    StandardContentBlock,
+    TextBlock,
+    ToolUseBlock,
+)
 from .usage import Usage, normalize_usage
 
 __version__ = "1.0.0"
@@ -51,19 +59,25 @@ __all__ = [
     "EventSink",
     "FrozenClock",
     "IdGenerator",
+    "InvalidToolCall",
     "Message",
     "MessageId",
     "Meter",
     "PolicyGate",
     "ProviderLock",
+    "ProviderState",
+    "ReasoningBlock",
     "Role",
     "RunId",
     "SessionId",
+    "StandardContentBlock",
     "StopReason",
     "SystemClock",
+    "TextBlock",
     "ToolCall",
     "ToolCallStatus",
     "ToolResult",
+    "ToolUseBlock",
     "ToolUseId",
     "TurnId",
     "Usage",
