@@ -2,7 +2,7 @@ import json
 
 import pytest
 from rd_agent_contracts import SCHEMA_VERSION
-from rd_agent_contracts.events import AgentEvent
+from rd_agent_contracts.events import AgentEvent, EventDraft
 
 
 def test_agent_event_minimal():
@@ -57,3 +57,15 @@ def test_agent_event_serializable():
     parsed = json.loads(s)
     assert parsed["seq"] == 1
     assert parsed["payload"]["tool_use_id"] == "tu_1"
+
+
+def test_event_draft_explicit_schema_version():
+    draft = EventDraft(
+        event_type="x",
+        payload={},
+        schema_version="0.9.0",
+    )
+
+    event = draft.to_event(run_id="run_x", seq=1, timestamp_ms=1)
+
+    assert event.schema_version == "0.9.0"

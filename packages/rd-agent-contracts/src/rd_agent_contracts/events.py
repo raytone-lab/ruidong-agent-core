@@ -33,3 +33,43 @@ class AgentEvent:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+@dataclass(frozen=True)
+class EventDraft:
+    """Event payload before the host assigns run-local sequence.
+
+    EventLogPort implementations allocate ``seq`` and may fill ``timestamp_ms``
+    when the draft leaves it unset.
+    """
+
+    event_type: str
+    payload: dict[str, Any]
+    turn_id: str = ""
+    timestamp_ms: int | None = None
+    schema_version: str = field(default=_DEFAULT_SCHEMA_VERSION)
+    message_id: str | None = None
+    action_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.event_type:
+            raise ValueError("event_type must be non-empty")
+
+    def to_event(
+        self,
+        *,
+        run_id: str,
+        seq: int,
+        timestamp_ms: int,
+    ) -> AgentEvent:
+        return AgentEvent(
+            seq=seq,
+            timestamp_ms=timestamp_ms,
+            run_id=run_id,
+            turn_id=self.turn_id,
+            event_type=self.event_type,
+            payload=dict(self.payload),
+            schema_version=self.schema_version,
+            message_id=self.message_id,
+            action_id=self.action_id,
+        )

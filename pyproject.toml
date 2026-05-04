@@ -12,7 +12,7 @@ dependencies = [
 ]
 
 [tool.uv.workspace]
-members = ["packages/*", "tools"]
+members = ["packages/rd-*", "tools"]
 
 [tool.uv.sources]
 rd-agent-contracts = { workspace = true }

@@ -4,7 +4,12 @@ Agent Runtime PaaS — 把 codesphere-saas 中的 agent 能力抽象为可被任
 
 ## 状态
 
-Phase A（库形态 + replay 基线），版本 1.0.0。
+Phase B 进行中。
+
+- `rd-agent-contracts`：当前开发版 `1.4.0`，新增 RunPersistencePort / EventLogPort / ContinuationQueuePort / AgentRun lifecycle contract；`SCHEMA_VERSION` 仍为 `1.2.0`。
+- `rd-llm-adapter`：已从 `codesphere-saas` model_adapter 抽出，当前发布 tag 为 `rd-llm-adapter-v1.0.1`。
+- `rd-llm-gateway`：保留 Phase A v1 产物，暂不作为 Phase B engine 边界。
+- `rd-replay-evals` / `rd-tools`：保留 Phase A replay 和运维工具链。
 
 ## 仓库结构
 
@@ -12,7 +17,8 @@ Phase A（库形态 + replay 基线），版本 1.0.0。
 ruidong-agent-core/
 ├── packages/
 │   ├── rd-agent-contracts/    # P1 跨包共享协议（types/ports/event envelope）
-│   ├── rd-llm-gateway/        # P2 LLMProvider + stream chunk normalizer
+│   ├── rd-llm-adapter/        # Phase B provider adapter + raw chunk replay
+│   ├── rd-llm-gateway/        # Phase A LLMProvider + stream chunk normalizer
 │   └── rd-replay-evals/       # P9 录制器 + replay 引擎 + golden traces
 ├── tools/                     # 独立 CLI 工具（dump_run 等）
 └── pyproject.toml             # uv workspace root

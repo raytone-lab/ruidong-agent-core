@@ -1,15 +1,14 @@
 # Phase B 启动备忘录
 
-**状态**：当前权威启动备忘录（已吸收 2026-05-02 Codex review）
+**状态**：历史启动备忘录。当前代码基线以 `main` + README 为准；本文件保留 Phase B 分层和风险点背景。
+
 **适用仓库**：`ruidong-agent-core` + `codesphere-saas`
 
 ---
 
 ## 1. 当前基线
 
-Phase A 已完成，tag：`phase-a-complete`。
-
-当前本地和远端的 Phase A 完整资产在 `feature/phase-a`：
+Phase A 已完成，历史 tag：`phase-a-complete`。当前 `main` 已包含后续 Phase B 资产；下面的 `feature/phase-a` 启动命令仅作为历史记录保留：
 
 ```bash
 cd ~/ruidong/ruidong-agent-core
@@ -19,7 +18,7 @@ git log --oneline -5
 git tag --contains 5ace0e3
 ```
 
-不要直接从 `main` 启动 Phase B，除非已经确认 `feature/phase-a` 合并进 `main`。截至本备忘录修订时，`main` 不包含 Phase A 后续资产、`PHASE-B-NOTES.md`、`tools/` 和 `traces/`。
+不要再按旧备忘录从 `feature/phase-a` 重新起步；继续工作应以当前 `main` 为基线。
 
 Phase A 资产：
 
@@ -160,6 +159,9 @@ B-2 只抽第一批可落地 ports：
 
 - `RunPersistencePort`
 - `EventLogPort`
+- `ContinuationQueuePort`
+
+当前 contracts 进展：`rd-agent-contracts` 开发版 `1.4.0` 已补 `RunPersistencePort`、`EventDraft` / `EventLogPort`、`ContinuationQueuePort` 和 run lifecycle policy helpers。SaaS 侧适配器已在 `codesphere-saas` 本地接入；发布部署前需要推送 `rd-agent-contracts-v1.4.0` release 并把 SaaS 依赖切回可安装来源。
 
 EventLog seq 决策：
 
@@ -167,6 +169,12 @@ EventLog seq 决策：
 - 调用方提交 `EventDraft`，不提交完整 `AgentEvent`。
 - `append_event(run_id, draft, idempotency_key=None) -> AgentEvent` 返回已分配 seq 的事件。
 - contract tests 必须覆盖并发 append 单调递增、idempotency_key 重放不重复写、`stream_events(from_seq)` 从指定 seq 后继续。
+
+ContinuationQueue 决策：
+
+- `ContinuationQueuePort` 只暴露 `ContinuationJobSpec` / `ContinuationJobRecord` / 队列状态，不暴露 ORM model。
+- `claim_next` 的具体锁策略由 host adapter 实现；SaaS adapter 在 PostgreSQL 使用 `FOR UPDATE SKIP LOCKED`，SQLite 测试使用有序查询。
+- retry delay、max attempts 默认值仍由 host 配置决定；contracts 只定义显式字段和状态迁移。
 
 `rd-saas-adapter` 放在 `codesphere-saas/packages/rd-saas-adapter/`。B 阶段允许有限 app import，但必须写清边界：
 
