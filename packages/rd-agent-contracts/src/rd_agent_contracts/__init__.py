@@ -6,6 +6,7 @@
 - EventDraft / EventLogPort append-only 事件日志契约
 - AgentRun lifecycle 持久化数据与 port
 - ContinuationQueuePort 自动续跑队列契约
+- Subagent task/profile、timeline read model、tool execution 契约
 - 横切 ports protocol（EventSink / Meter / BudgetGate / PolicyGate /
   CancellationToken / BlobWriter / Clock / IdGenerator）
 - __version__：包发版号（跟 pyproject.toml 同步）
@@ -65,6 +66,43 @@ from .run_policy import (
     needs_attention_for_stop_reason,
     should_auto_continue_run,
 )
+from .subagent import (
+    BROWSER_TOOLS,
+    DIAGNOSTIC_TOOLS,
+    READ_ONLY_TOOLS,
+    STANDARD_SUBAGENT_PROFILES,
+    TASK_TOOLS,
+    TERMINAL_SUBAGENT_STATUSES,
+    WEB_TOOLS,
+    WRITE_TOOLS,
+    SubagentProfile,
+    SubagentProfileId,
+    SubagentTaskPort,
+    SubagentTaskRecord,
+    SubagentTaskSpec,
+    SubagentTaskStatus,
+    normalize_subagent_profile_id,
+    normalize_write_scope_paths,
+    resolve_subagent_profile,
+    write_scopes_overlap,
+)
+from .timeline import (
+    AgentTimeline,
+    TimelineReadPort,
+    TimelineRequest,
+    TimelineRun,
+    TimelineSubagentTask,
+)
+from .tool_execution import (
+    ToolDefinition,
+    ToolExecutionContext,
+    ToolExecutionRequest,
+    ToolExecutionResult,
+    ToolExecutorPort,
+    ToolObservabilityPort,
+    ToolObservabilityRecord,
+    ToolRegistryPort,
+)
 from .transcript_blocks import (
     InvalidToolCall,
     ProviderState,
@@ -76,14 +114,16 @@ from .transcript_blocks import (
 )
 from .usage import Usage, normalize_usage
 
-__version__ = "1.4.0"
+__version__ = "1.5.0"
 SCHEMA_VERSION = "1.2.0"
 
 __all__ = [
     "SCHEMA_VERSION",
     "ActionId",
     "AgentKind",
+    "AgentTimeline",
     "AgentEvent",
+    "BROWSER_TOOLS",
     "BlobRef",
     "BlobWriter",
     "BudgetEnvelope",
@@ -94,6 +134,7 @@ __all__ = [
     "ContinuationJobSpec",
     "ContinuationJobStatus",
     "ContinuationQueuePort",
+    "DIAGNOSTIC_TOOLS",
     "EventDraft",
     "EventLogPort",
     "EventSink",
@@ -106,6 +147,7 @@ __all__ = [
     "PolicyGate",
     "ProviderLock",
     "ProviderState",
+    "READ_ONLY_TOOLS",
     "ReasoningBlock",
     "Role",
     "RunBudget",
@@ -120,9 +162,30 @@ __all__ = [
     "SessionId",
     "StandardContentBlock",
     "StandardToolCall",
+    "STANDARD_SUBAGENT_PROFILES",
     "StopReason",
+    "SubagentProfile",
+    "SubagentProfileId",
+    "SubagentTaskPort",
+    "SubagentTaskRecord",
+    "SubagentTaskSpec",
+    "SubagentTaskStatus",
     "SystemClock",
+    "TASK_TOOLS",
+    "TERMINAL_SUBAGENT_STATUSES",
     "TextBlock",
+    "TimelineReadPort",
+    "TimelineRequest",
+    "TimelineRun",
+    "TimelineSubagentTask",
+    "ToolDefinition",
+    "ToolExecutionContext",
+    "ToolExecutionRequest",
+    "ToolExecutionResult",
+    "ToolExecutorPort",
+    "ToolObservabilityPort",
+    "ToolObservabilityRecord",
+    "ToolRegistryPort",
     "ToolCall",
     "ToolCallStatus",
     "ToolResult",
@@ -131,6 +194,8 @@ __all__ = [
     "TurnId",
     "Usage",
     "UuidIdGenerator",
+    "WEB_TOOLS",
+    "WRITE_TOOLS",
     "CONTINUABLE_STOP_REASONS",
     "NEEDS_ATTENTION_STOP_REASONS",
     "TERMINAL_WAIT_REASONS",
@@ -139,5 +204,9 @@ __all__ = [
     "is_terminal_wait_stop_reason",
     "needs_attention_for_stop_reason",
     "normalize_usage",
+    "normalize_subagent_profile_id",
+    "normalize_write_scope_paths",
+    "resolve_subagent_profile",
     "should_auto_continue_run",
+    "write_scopes_overlap",
 ]
