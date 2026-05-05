@@ -9,7 +9,16 @@ CONTINUABLE_STOP_REASONS = frozenset({
     "loop_break:max_turns",
 })
 TERMINAL_WAIT_REASONS = frozenset({StopReason.ASK_USER.value})
-NEEDS_ATTENTION_STOP_REASONS = frozenset({StopReason.LOOP_BREAK_NO_PROGRESS.value})
+NEEDS_ATTENTION_STOP_REASONS = frozenset({
+    StopReason.MAX_TURNS.value,
+    StopReason.LOOP_BREAK_NO_PROGRESS.value,
+    "loop_break:max_turns",
+    "loop_break:max_tool_calls",
+    "loop_break:max_wall_clock",
+    "loop_break:repeated_tool_call",
+    "repeated_tool_call",
+    "empty_response",
+})
 
 
 def is_continuable_stop_reason(stop_reason: str | None) -> bool:
