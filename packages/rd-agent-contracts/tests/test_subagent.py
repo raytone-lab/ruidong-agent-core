@@ -55,6 +55,7 @@ class _InMemorySubagentTasks:
             parent_run_id=spec.parent_run_id,
             agent_profile=spec.agent_profile,
             write_scope_json=spec.write_scope_json,
+            depends_on_task_ids=spec.depends_on_task_ids,
             status="pending",
         )
         self.records[record.task_id] = record
@@ -76,7 +77,9 @@ def test_subagent_task_port_runtime_protocol():
             name="Frontend",
             description="Build UI",
             agent_profile="frontend_editor",
+            depends_on_task_ids=["task-parent"],
         )
     )
     assert record.task_id == "task-1"
+    assert record.depends_on_task_ids == ["task-parent"]
     assert port.load_task("task-1") == record

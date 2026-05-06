@@ -60,7 +60,9 @@ class TimelineSubagentTask:
     max_attempts: int = 3
     worker_id: str | None = None
     write_scope_json: dict[str, Any] | None = None
+    depends_on_task_ids: list[str] = field(default_factory=list)
     result_summary: str | None = None
+    outcome_json: dict[str, Any] | None = None
     error_message: str | None = None
     correlation_id: str | None = None
     created_at_ms: int | None = None

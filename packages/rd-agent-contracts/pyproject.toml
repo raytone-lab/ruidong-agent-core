@@ -1,6 +1,6 @@
 [project]
 name = "rd-agent-contracts"
-version = "1.5.0"
+version = "1.5.1"
 description = "Agent Runtime PaaS shared contracts (types, ports, event envelope)"
 requires-python = ">=3.12"
 dependencies = [

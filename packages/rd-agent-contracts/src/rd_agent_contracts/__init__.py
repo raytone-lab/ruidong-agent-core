@@ -114,7 +114,7 @@ from .transcript_blocks import (
 )
 from .usage import Usage, normalize_usage
 
-__version__ = "1.5.0"
+__version__ = "1.5.1"
 SCHEMA_VERSION = "1.2.0"
 
 __all__ = [

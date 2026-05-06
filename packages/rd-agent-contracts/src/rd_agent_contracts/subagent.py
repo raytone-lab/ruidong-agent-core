@@ -232,6 +232,7 @@ class SubagentTaskSpec:
     parent_run_id: str | None = None
     agent_profile: str | None = None
     write_scope_json: dict[str, Any] | None = None
+    depends_on_task_ids: list[str] = field(default_factory=list)
     correlation_id: str | None = None
     max_attempts: int = 3
     available_at_ms: int | None = None
@@ -252,6 +253,8 @@ class SubagentTaskRecord:
     max_attempts: int = 3
     worker_id: str | None = None
     result_summary: str | None = None
+    outcome_json: dict[str, Any] | None = None
+    depends_on_task_ids: list[str] = field(default_factory=list)
     error_message: str | None = None
     correlation_id: str | None = None
     created_at_ms: int | None = None

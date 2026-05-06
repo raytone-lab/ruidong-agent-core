@@ -6,7 +6,7 @@ Agent Runtime PaaS — 把 codesphere-saas 中的 agent 能力抽象为可被任
 
 Phase B 进行中。
 
-- `rd-agent-contracts`：当前开发版 `1.5.0`，新增 RunPersistencePort / EventLogPort / ContinuationQueuePort / SubagentTaskPort / TimelineReadPort / ToolRegistryPort 等 Agent lifecycle contract；`SCHEMA_VERSION` 仍为 `1.2.0`。
+- `rd-agent-contracts`：当前开发版 `1.5.1`，新增 RunPersistencePort / EventLogPort / ContinuationQueuePort / SubagentTaskPort / TimelineReadPort / ToolRegistryPort 等 Agent lifecycle contract；`SCHEMA_VERSION` 仍为 `1.2.0`。
 - `rd-llm-adapter`：已从 `codesphere-saas` model_adapter 抽出，当前发布 tag 为 `rd-llm-adapter-v1.0.1`。
 - `rd-llm-gateway`：保留 Phase A v1 产物，暂不作为 Phase B engine 边界。
 - `rd-replay-evals` / `rd-tools`：保留 Phase A replay 和运维工具链。
