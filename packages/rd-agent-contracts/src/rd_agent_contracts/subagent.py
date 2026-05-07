@@ -319,6 +319,7 @@ class SubagentTaskPort(Protocol):
         *,
         task_id: str,
         result_summary: str | None = None,
+        outcome_json: dict[str, Any] | None = None,
         completed_at_ms: int | None = None,
     ) -> SubagentTaskRecord | None: ...
 
@@ -327,5 +328,26 @@ class SubagentTaskPort(Protocol):
         *,
         task_id: str,
         error_message: str,
+        outcome_json: dict[str, Any] | None = None,
+        completed_at_ms: int | None = None,
+    ) -> SubagentTaskRecord | None: ...
+
+    def mark_waiting(
+        self,
+        *,
+        task_id: str,
+        result_summary: str | None = None,
+        outcome_json: dict[str, Any] | None = None,
+    ) -> SubagentTaskRecord | None: ...
+
+    def mark_running(self, *, task_id: str) -> SubagentTaskRecord | None: ...
+
+    def record_failure(
+        self,
+        *,
+        task_id: str,
+        error_message: str,
+        outcome_json: dict[str, Any] | None = None,
+        delay_seconds: int | None = None,
         completed_at_ms: int | None = None,
     ) -> SubagentTaskRecord | None: ...
