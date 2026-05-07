@@ -107,6 +107,7 @@ from .subagent_runtime import (
     SubagentFinalizeOperation,
     SubagentToolHistoryEntry,
     adjusted_subagent_stop_reason_for_profile,
+    build_subagent_aggregate_outcome,
     build_subagent_instruction_text,
     build_subagent_outcome_json,
     build_subagent_run_record,
@@ -155,7 +156,7 @@ from .workspace import (
     should_merge_subagent_workspace,
 )
 
-__version__ = "1.11.0"
+__version__ = "1.12.0"
 SCHEMA_VERSION = "1.2.0"
 
 __all__ = [
@@ -255,6 +256,7 @@ __all__ = [
     "NEEDS_ATTENTION_STOP_REASONS",
     "TERMINAL_WAIT_REASONS",
     "adjusted_subagent_stop_reason_for_profile",
+    "build_subagent_aggregate_outcome",
     "build_subagent_instruction_text",
     "build_subagent_outcome_json",
     "build_subagent_run_record",

@@ -7,12 +7,13 @@ host runtime without depending on its database, web framework, or event bus.
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
 from .subagent import (
+    TERMINAL_SUBAGENT_STATUSES,
     SubagentRunRecord,
     SubagentTaskRecord,
     SubagentTaskStatus,
@@ -302,6 +303,135 @@ def build_subagent_task_payload(
     }
 
 
+def build_subagent_aggregate_outcome(
+    records: Iterable[SubagentTaskRecord],
+) -> dict[str, Any]:
+    children: list[dict[str, Any]] = []
+    changed_paths: list[str] = []
+    errors: list[dict[str, Any]] = []
+    risks: list[dict[str, Any]] = []
+    artifacts: list[dict[str, Any]] = []
+    status_counts: dict[str, int] = {}
+    validation_counts = {"passed": 0, "failed": 0, "unknown": 0}
+
+    for index, record in enumerate(records, start=1):
+        status = str(record.status or "")
+        if status:
+            status_counts[status] = status_counts.get(status, 0) + 1
+        outcome = _mapping_or_empty(record.outcome_json)
+        child_changed_paths = _unique_strings(outcome.get("changed_paths"))
+        _extend_unique(changed_paths, child_changed_paths)
+        validation = _normalize_validation_outcome(outcome.get("validation"))
+        if validation["ok"] is True:
+            validation_counts["passed"] += 1
+        elif validation["ok"] is False:
+            validation_counts["failed"] += 1
+        else:
+            validation_counts["unknown"] += 1
+
+        child_risks = _normalize_json_list(outcome.get("risks"))
+        child_artifacts = _normalize_json_list(outcome.get("artifacts"))
+        child_error = _normalize_child_error(record, outcome)
+        if child_error:
+            errors.append(
+                {
+                    "index": index,
+                    "task_id": record.task_id,
+                    "name": record.name,
+                    **child_error,
+                }
+            )
+        for risk in child_risks:
+            risks.append({"index": index, "task_id": record.task_id, "risk": risk})
+        for artifact in child_artifacts:
+            artifacts.append(
+                {"index": index, "task_id": record.task_id, "artifact": artifact}
+            )
+
+        children.append(
+            {
+                "index": index,
+                "task_id": record.task_id,
+                "name": record.name,
+                "description": record.description,
+                "status": status,
+                "agent_profile": record.agent_profile,
+                "write_scope": _json_safe(record.write_scope_json),
+                "depends_on_task_ids": list(record.depends_on_task_ids),
+                "parent_run_id": record.parent_run_id,
+                "attempts": record.attempts,
+                "max_attempts": record.max_attempts,
+                "summary": _clean_summary(
+                    outcome.get("summary")
+                    or record.result_summary
+                    or record.error_message
+                    or "No summary"
+                ),
+                "result_summary": record.result_summary,
+                "changed_paths": child_changed_paths,
+                "validation": validation,
+                "risks": child_risks,
+                "artifacts": child_artifacts,
+                "error": child_error,
+                "stop_reason": _string_or_none(outcome.get("stop_reason")),
+                "tool_calls_count": _coerce_int(outcome.get("tool_calls_count")),
+                "turns_count": _coerce_int(outcome.get("turns_count")),
+                "created_at_ms": record.created_at_ms,
+                "started_at_ms": record.started_at_ms,
+                "completed_at_ms": record.completed_at_ms,
+            }
+        )
+
+    open_count = sum(
+        count
+        for status, count in status_counts.items()
+        if status not in TERMINAL_SUBAGENT_STATUSES
+    )
+    failed_count = sum(
+        status_counts.get(status, 0)
+        for status in (
+            SubagentTaskStatus.FAILED.value,
+            SubagentTaskStatus.CANCELLED.value,
+            SubagentTaskStatus.DEAD_LETTER.value,
+        )
+    )
+    if not children:
+        aggregate_status = "empty"
+    elif open_count:
+        aggregate_status = "running"
+    elif failed_count or errors:
+        aggregate_status = "failed"
+    else:
+        aggregate_status = "completed"
+
+    validation_ok: bool | None
+    if validation_counts["failed"]:
+        validation_ok = False
+    elif validation_counts["passed"]:
+        validation_ok = True
+    else:
+        validation_ok = None
+
+    return {
+        "schema_version": "1.0",
+        "kind": "subagent_aggregate",
+        "status": aggregate_status,
+        "total": len(children),
+        "open": open_count,
+        "failed": failed_count,
+        "status_counts": status_counts,
+        "changed_paths": changed_paths,
+        "validation": {
+            "ok": validation_ok,
+            **validation_counts,
+        },
+        "risks": risks,
+        "artifacts": artifacts,
+        "errors": errors,
+        "children": children,
+    }
+
+
 def build_subagent_run_record(
     *,
     task: SubagentTaskRecord,
@@ -320,35 +450,126 @@ def build_subagent_run_record(
 
 
 def format_subagent_aggregate(records: Iterable[SubagentTaskRecord]) -> str:
-    items = list(records)
-    if not items:
+    aggregate = build_subagent_aggregate_outcome(records)
+    children = aggregate["children"]
+    if not children:
         return ""
     lines = ["Subagent results:"]
-    for index, record in enumerate(items, start=1):
-        outcome = record.outcome_json if isinstance(record.outcome_json, dict) else {}
-        summary = (
-            outcome.get("summary")
-            or record.result_summary
-            or record.error_message
-            or "No summary"
-        )
-        summary = " ".join(str(summary).split())
+    for child in children:
+        summary = child["summary"]
         if len(summary) > 500:
             summary = summary[:500] + "..."
-        changed_paths = outcome.get("changed_paths")
-        validation = outcome.get("validation")
+        changed_paths = child["changed_paths"]
+        validation = child["validation"]
         detail_parts: list[str] = []
-        if isinstance(changed_paths, list) and changed_paths:
+        if changed_paths:
             detail_parts.append(
                 "changed: " + ", ".join(str(path) for path in changed_paths[:8])
             )
-        if isinstance(validation, dict) and validation.get("tools"):
+        if validation["tools"]:
             detail_parts.append(
                 "validation: " + ("passed" if validation.get("ok") else "failed")
             )
         detail = f" ({'; '.join(detail_parts)})" if detail_parts else ""
-        lines.append(f"{index}. [{record.status}] {record.name}: {summary}{detail}")
+        lines.append(
+            f"{child['index']}. [{child['status']}] {child['name']}: {summary}{detail}"
+        )
     return "\n".join(lines)
+
+
+def _mapping_or_empty(value: Any) -> Mapping[str, Any]:
+    return value if isinstance(value, Mapping) else {}
+
+
+def _unique_strings(value: Any) -> list[str]:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        return []
+    items: list[str] = []
+    for raw in value:
+        text = str(raw or "").strip()
+        if text and text not in items:
+            items.append(text)
+    return items
+
+
+def _extend_unique(target: list[str], values: Iterable[str]) -> None:
+    for value in values:
+        if value not in target:
+            target.append(value)
+
+
+def _normalize_json_list(value: Any) -> list[Any]:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        return []
+    return [_json_safe(item) for item in value]
+
+
+def _normalize_validation_outcome(value: Any) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        return {"ok": None, "tools": []}
+    raw_tools = value.get("tools")
+    tools: list[dict[str, Any]] = []
+    if isinstance(raw_tools, Sequence) and not isinstance(raw_tools, (str, bytes)):
+        for raw_tool in raw_tools:
+            if isinstance(raw_tool, Mapping):
+                tools.append(
+                    {
+                        "name": str(raw_tool.get("name") or ""),
+                        "ok": (
+                            raw_tool.get("ok")
+                            if isinstance(raw_tool.get("ok"), bool)
+                            else None
+                        ),
+                        "duration_ms": _coerce_int(raw_tool.get("duration_ms")),
+                    }
+                )
+            else:
+                tools.append({"name": str(raw_tool), "ok": None, "duration_ms": None})
+    ok = value.get("ok")
+    return {"ok": ok if isinstance(ok, bool) else None, "tools": tools}
+
+
+def _normalize_child_error(
+    record: SubagentTaskRecord,
+    outcome: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    raw_error = outcome.get("error")
+    error = _json_safe(raw_error) if isinstance(raw_error, Mapping) else None
+    error_type = _string_or_none(outcome.get("error_type"))
+    tool_error_type = _string_or_none(outcome.get("tool_error_type"))
+    message = _string_or_none(outcome.get("error_message")) or record.error_message
+    if not error_type and isinstance(error, Mapping):
+        error_type = _string_or_none(error.get("type") or error.get("code"))
+    if not (error or error_type or tool_error_type or message):
+        return None
+    return {
+        "message": _clean_summary(message or "", max_length=1000) if message else None,
+        "type": error_type,
+        "tool_error_type": tool_error_type,
+        "detail": error,
+    }
+
+
+def _clean_summary(value: Any, *, max_length: int = 4000) -> str:
+    summary = " ".join(str(value or "").split()) or "No summary"
+    return summary[:max_length]
+
+
+def _string_or_none(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _json_safe(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, str | int | float | bool) or value is None:
+        return value
+    return str(value)
 
 
 def _failure_error_type(failure: Mapping[str, Any] | None) -> str | None:

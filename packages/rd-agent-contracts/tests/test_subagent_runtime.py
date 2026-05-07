@@ -4,6 +4,7 @@ from rd_agent_contracts import (
     SubagentFinalizeOperation,
     SubagentTaskRecord,
     adjusted_subagent_stop_reason_for_profile,
+    build_subagent_aggregate_outcome,
     build_subagent_instruction_text,
     build_subagent_outcome_json,
     build_subagent_run_record,
@@ -156,6 +157,75 @@ def test_subagent_payload_and_aggregate_are_record_based():
     assert aggregate.startswith("Subagent results:")
     assert "[completed] Verifier: validated" in aggregate
     assert "changed: client/src/App.tsx" in aggregate
+
+
+def test_subagent_aggregate_outcome_preserves_child_order_and_structured_details():
+    completed = SubagentTaskRecord(
+        task_id="task-1",
+        user_request_id="req-1",
+        project_id="proj-1",
+        name="Editor",
+        description="Implement UI",
+        status="completed",
+        agent_profile="frontend_editor",
+        write_scope_json={"paths": ["client/src"]},
+        result_summary="fallback",
+        outcome_json={
+            "summary": "implemented",
+            "changed_paths": ["client/src/App.tsx", "client/src/App.tsx"],
+            "validation": {"tools": [{"name": "run_tests", "ok": True}], "ok": True},
+            "risks": [{"level": "low", "message": "CSS only"}],
+            "artifacts": [{"path": "client/src/App.tsx"}],
+            "stop_reason": "stop",
+            "tool_calls_count": 4,
+            "turns_count": 2,
+        },
+    )
+    failed = SubagentTaskRecord(
+        task_id="task-2",
+        user_request_id="req-1",
+        project_id="proj-1",
+        name="Verifier",
+        description="Validate UI",
+        status="failed",
+        error_message="browser failed",
+        outcome_json={
+            "summary": "could not validate",
+            "changed_paths": ["client/src/App.tsx", "client/src/styles.css"],
+            "validation": {
+                "tools": [{"name": "browser_snapshot", "ok": False}],
+                "ok": False,
+            },
+            "error": {"type": "browser_error"},
+            "tool_error_type": "is_directory",
+        },
+    )
+
+    aggregate = build_subagent_aggregate_outcome([completed, failed])
+
+    assert aggregate["kind"] == "subagent_aggregate"
+    assert aggregate["status"] == "failed"
+    assert aggregate["total"] == 2
+    assert aggregate["failed"] == 1
+    assert aggregate["changed_paths"] == [
+        "client/src/App.tsx",
+        "client/src/styles.css",
+    ]
+    assert aggregate["validation"] == {
+        "ok": False,
+        "passed": 1,
+        "failed": 1,
+        "unknown": 0,
+    }
+    assert [child["task_id"] for child in aggregate["children"]] == [
+        "task-1",
+        "task-2",
+    ]
+    assert aggregate["children"][0]["risks"][0]["level"] == "low"
+    assert aggregate["children"][1]["error"]["type"] == "browser_error"
+    assert aggregate["children"][1]["error"]["tool_error_type"] == "is_directory"
+    assert aggregate["errors"][0]["task_id"] == "task-2"
+    assert aggregate["artifacts"][0]["artifact"]["path"] == "client/src/App.tsx"
 
 
 def test_build_subagent_run_record_copies_task_context():
