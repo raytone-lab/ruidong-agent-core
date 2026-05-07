@@ -77,6 +77,8 @@ from .subagent import (
     WRITE_TOOLS,
     SubagentProfile,
     SubagentProfileId,
+    SubagentRunPort,
+    SubagentRunRecord,
     SubagentTaskPort,
     SubagentTaskRecord,
     SubagentTaskSpec,
@@ -95,6 +97,7 @@ from .subagent_runtime import (
     adjusted_subagent_stop_reason_for_profile,
     build_subagent_instruction_text,
     build_subagent_outcome_json,
+    build_subagent_run_record,
     build_subagent_task_payload,
     decide_subagent_finalization,
     extract_subagent_changed_paths,
@@ -140,7 +143,7 @@ from .workspace import (
     should_merge_subagent_workspace,
 )
 
-__version__ = "1.8.0"
+__version__ = "1.9.0"
 SCHEMA_VERSION = "1.2.0"
 
 __all__ = [
@@ -195,6 +198,8 @@ __all__ = [
     "SubagentProfileId",
     "SubagentFinalizeDecision",
     "SubagentFinalizeOperation",
+    "SubagentRunPort",
+    "SubagentRunRecord",
     "SubagentTaskPort",
     "SubagentTaskRecord",
     "SubagentTaskSpec",
@@ -238,6 +243,7 @@ __all__ = [
     "adjusted_subagent_stop_reason_for_profile",
     "build_subagent_instruction_text",
     "build_subagent_outcome_json",
+    "build_subagent_run_record",
     "build_subagent_task_payload",
     "completion_status_for_stop_reason",
     "decide_subagent_finalization",

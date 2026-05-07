@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from rd_agent_contracts import (
     SubagentProfileId,
+    SubagentRunPort,
+    SubagentRunRecord,
     SubagentTaskPort,
     SubagentTaskRecord,
     SubagentTaskSpec,
@@ -229,6 +231,29 @@ class _InMemorySubagentTasks:
         )
 
 
+class _InMemorySubagentRuns:
+    def __init__(self):
+        self.records: dict[str, SubagentRunRecord] = {}
+
+    def create_run_for_task(
+        self,
+        task: SubagentTaskRecord,
+        *,
+        session_id: str | None = None,
+    ) -> SubagentRunRecord:
+        record = SubagentRunRecord(
+            task_id=task.task_id,
+            run_id=f"run-{task.task_id}",
+            user_request_id=task.user_request_id,
+            project_id=task.project_id,
+            session_id=session_id,
+            parent_run_id=task.parent_run_id,
+            correlation_id=task.correlation_id,
+        )
+        self.records[record.run_id] = record
+        return record
+
+
 def _replace_record(record: SubagentTaskRecord, **changes) -> SubagentTaskRecord:
     payload = record.__dict__.copy()
     payload.update(changes)
@@ -261,3 +286,26 @@ def test_subagent_task_port_runtime_protocol():
     assert completed is not None
     assert completed.status == "completed"
     assert completed.outcome_json == {"status": "completed"}
+
+
+def test_subagent_run_port_runtime_protocol():
+    task = SubagentTaskRecord(
+        task_id="task-1",
+        user_request_id="req-1",
+        project_id="proj-1",
+        name="Verifier",
+        description="Check UI",
+        status="running",
+        parent_run_id="run-parent",
+        correlation_id="corr-1",
+    )
+    port: SubagentRunPort = _InMemorySubagentRuns()  # type: ignore[assignment]
+
+    assert isinstance(port, SubagentRunPort)
+    record = port.create_run_for_task(task, session_id="session-1")
+
+    assert record.run_id == "run-task-1"
+    assert record.task_id == task.task_id
+    assert record.session_id == "session-1"
+    assert record.parent_run_id == "run-parent"
+    assert record.correlation_id == "corr-1"

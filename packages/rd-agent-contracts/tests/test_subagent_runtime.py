@@ -6,6 +6,7 @@ from rd_agent_contracts import (
     adjusted_subagent_stop_reason_for_profile,
     build_subagent_instruction_text,
     build_subagent_outcome_json,
+    build_subagent_run_record,
     build_subagent_task_payload,
     decide_subagent_finalization,
     extract_subagent_changed_paths,
@@ -155,6 +156,29 @@ def test_subagent_payload_and_aggregate_are_record_based():
     assert aggregate.startswith("Subagent results:")
     assert "[completed] Verifier: validated" in aggregate
     assert "changed: client/src/App.tsx" in aggregate
+
+
+def test_build_subagent_run_record_copies_task_context():
+    task = SubagentTaskRecord(
+        task_id="task-1",
+        user_request_id="req-1",
+        project_id="proj-1",
+        name="Verifier",
+        description="Check UI",
+        status="running",
+        parent_run_id="run-parent",
+        correlation_id="corr-1",
+    )
+
+    record = build_subagent_run_record(task=task, run_id="run-child", session_id="session-1")
+
+    assert record.task_id == "task-1"
+    assert record.run_id == "run-child"
+    assert record.user_request_id == "req-1"
+    assert record.project_id == "proj-1"
+    assert record.session_id == "session-1"
+    assert record.parent_run_id == "run-parent"
+    assert record.correlation_id == "corr-1"
 
 
 def test_extract_subagent_changed_paths_accepts_objects():

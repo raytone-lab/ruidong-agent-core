@@ -13,6 +13,7 @@ from enum import StrEnum
 from typing import Any
 
 from .subagent import (
+    SubagentRunRecord,
     SubagentTaskRecord,
     SubagentTaskStatus,
     resolve_subagent_profile,
@@ -299,6 +300,23 @@ def build_subagent_task_payload(
         "error": dict(error) if error else None,
         "parent_run_id": record.parent_run_id,
     }
+
+
+def build_subagent_run_record(
+    *,
+    task: SubagentTaskRecord,
+    run_id: str,
+    session_id: str | None = None,
+) -> SubagentRunRecord:
+    return SubagentRunRecord(
+        task_id=task.task_id,
+        run_id=run_id,
+        user_request_id=task.user_request_id,
+        project_id=task.project_id,
+        session_id=session_id,
+        parent_run_id=task.parent_run_id,
+        correlation_id=task.correlation_id,
+    )
 
 
 def format_subagent_aggregate(records: Iterable[SubagentTaskRecord]) -> str:

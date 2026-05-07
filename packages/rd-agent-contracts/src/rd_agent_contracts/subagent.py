@@ -265,6 +265,18 @@ class SubagentTaskRecord:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class SubagentRunRecord:
+    task_id: str
+    run_id: str
+    user_request_id: str
+    project_id: str
+    session_id: str | None = None
+    parent_run_id: str | None = None
+    correlation_id: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
 @runtime_checkable
 class SubagentTaskPort(Protocol):
     """Persistence and dispatch boundary for subagent task orchestration."""
@@ -351,3 +363,15 @@ class SubagentTaskPort(Protocol):
         delay_seconds: int | None = None,
         completed_at_ms: int | None = None,
     ) -> SubagentTaskRecord | None: ...
+
+
+@runtime_checkable
+class SubagentRunPort(Protocol):
+    """Run creation boundary for claimed subagent tasks."""
+
+    def create_run_for_task(
+        self,
+        task: SubagentTaskRecord,
+        *,
+        session_id: str | None = None,
+    ) -> SubagentRunRecord: ...
