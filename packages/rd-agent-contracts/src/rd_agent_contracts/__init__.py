@@ -86,6 +86,23 @@ from .subagent import (
     resolve_subagent_profile,
     write_scopes_overlap,
 )
+from .subagent_runtime import (
+    MUTATING_TOOLS,
+    VERIFIER_VALIDATION_TOOLS,
+    SubagentFinalizeDecision,
+    SubagentFinalizeOperation,
+    SubagentToolHistoryEntry,
+    adjusted_subagent_stop_reason_for_profile,
+    build_subagent_instruction_text,
+    build_subagent_outcome_json,
+    build_subagent_task_payload,
+    decide_subagent_finalization,
+    extract_subagent_changed_paths,
+    first_failed_tool_error_type,
+    format_subagent_aggregate,
+    normalize_subagent_tool_history,
+    normalize_subagent_tool_history_entry,
+)
 from .timeline import (
     AgentTimeline,
     TimelineReadPort,
@@ -114,7 +131,7 @@ from .transcript_blocks import (
 )
 from .usage import Usage, normalize_usage
 
-__version__ = "1.6.0"
+__version__ = "1.7.0"
 SCHEMA_VERSION = "1.2.0"
 
 __all__ = [
@@ -144,6 +161,7 @@ __all__ = [
     "Message",
     "MessageId",
     "Meter",
+    "MUTATING_TOOLS",
     "PolicyGate",
     "ProviderLock",
     "ProviderState",
@@ -166,10 +184,13 @@ __all__ = [
     "StopReason",
     "SubagentProfile",
     "SubagentProfileId",
+    "SubagentFinalizeDecision",
+    "SubagentFinalizeOperation",
     "SubagentTaskPort",
     "SubagentTaskRecord",
     "SubagentTaskSpec",
     "SubagentTaskStatus",
+    "SubagentToolHistoryEntry",
     "SystemClock",
     "TASK_TOOLS",
     "TERMINAL_SUBAGENT_STATUSES",
@@ -194,17 +215,28 @@ __all__ = [
     "TurnId",
     "Usage",
     "UuidIdGenerator",
+    "VERIFIER_VALIDATION_TOOLS",
     "WEB_TOOLS",
     "WRITE_TOOLS",
     "CONTINUABLE_STOP_REASONS",
     "NEEDS_ATTENTION_STOP_REASONS",
     "TERMINAL_WAIT_REASONS",
+    "adjusted_subagent_stop_reason_for_profile",
+    "build_subagent_instruction_text",
+    "build_subagent_outcome_json",
+    "build_subagent_task_payload",
     "completion_status_for_stop_reason",
+    "decide_subagent_finalization",
+    "extract_subagent_changed_paths",
+    "first_failed_tool_error_type",
+    "format_subagent_aggregate",
     "is_continuable_stop_reason",
     "is_terminal_wait_stop_reason",
     "needs_attention_for_stop_reason",
     "normalize_usage",
     "normalize_subagent_profile_id",
+    "normalize_subagent_tool_history",
+    "normalize_subagent_tool_history_entry",
     "normalize_write_scope_paths",
     "resolve_subagent_profile",
     "should_auto_continue_run",
