@@ -130,8 +130,17 @@ from .transcript_blocks import (
     ToolUseBlock,
 )
 from .usage import Usage, normalize_usage
+from .workspace import (
+    SubagentWorkspaceHandle,
+    SubagentWorkspaceIsolationDecision,
+    SubagentWorkspaceMergeResult,
+    SubagentWorkspacePort,
+    SubagentWorkspaceSpec,
+    decide_subagent_workspace_isolation,
+    should_merge_subagent_workspace,
+)
 
-__version__ = "1.7.0"
+__version__ = "1.8.0"
 SCHEMA_VERSION = "1.2.0"
 
 __all__ = [
@@ -191,6 +200,11 @@ __all__ = [
     "SubagentTaskSpec",
     "SubagentTaskStatus",
     "SubagentToolHistoryEntry",
+    "SubagentWorkspaceHandle",
+    "SubagentWorkspaceIsolationDecision",
+    "SubagentWorkspaceMergeResult",
+    "SubagentWorkspacePort",
+    "SubagentWorkspaceSpec",
     "SystemClock",
     "TASK_TOOLS",
     "TERMINAL_SUBAGENT_STATUSES",
@@ -227,6 +241,7 @@ __all__ = [
     "build_subagent_task_payload",
     "completion_status_for_stop_reason",
     "decide_subagent_finalization",
+    "decide_subagent_workspace_isolation",
     "extract_subagent_changed_paths",
     "first_failed_tool_error_type",
     "format_subagent_aggregate",
@@ -240,5 +255,6 @@ __all__ = [
     "normalize_write_scope_paths",
     "resolve_subagent_profile",
     "should_auto_continue_run",
+    "should_merge_subagent_workspace",
     "write_scopes_overlap",
 ]
