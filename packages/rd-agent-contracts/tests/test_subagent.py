@@ -7,9 +7,15 @@ from rd_agent_contracts import (
     SubagentTaskPort,
     SubagentTaskRecord,
     SubagentTaskSpec,
+    filter_subagent_tools_for_profile,
+    find_write_scope_violations,
+    is_path_in_write_scope,
     normalize_subagent_profile_id,
+    normalize_subagent_scope_path,
     normalize_write_scope_paths,
     resolve_subagent_profile,
+    subagent_profile_schema_values,
+    validate_subagent_profile_scope,
     write_scopes_overlap,
 )
 
@@ -22,6 +28,13 @@ def test_write_scope_normalization_and_overlap():
     assert write_scopes_overlap(["src"], ["src/app"])
     assert not write_scopes_overlap(["src/frontend"], ["src/backend"])
     assert write_scopes_overlap([], ["src/backend"])
+    assert normalize_subagent_scope_path("./src\\app/") == "src/app"
+    assert is_path_in_write_scope("src/app/main.ts", ["src/app"])
+    assert not is_path_in_write_scope("src/other/main.ts", ["src/app"])
+    assert find_write_scope_violations(
+        ["src/app/main.ts", "src/other/main.ts"],
+        {"paths": ["src/app"]},
+    ) == ["src/other/main.ts"]
 
 
 def test_profile_aliases_and_tool_policy():
@@ -36,6 +49,58 @@ def test_profile_aliases_and_tool_policy():
     browser = resolve_subagent_profile("browser")
     assert browser.allows_tool("browser_snapshot")
     assert not browser.allows_tool("write_file")
+    assert browser.allows_tool("start_server")
+    assert subagent_profile_schema_values() == list(STANDARD_PROFILE_ORDER)
+
+
+STANDARD_PROFILE_ORDER = [
+    SubagentProfileId.GENERAL.value,
+    SubagentProfileId.PLANNER.value,
+    SubagentProfileId.FRONTEND_EDITOR.value,
+    SubagentProfileId.BACKEND_EDITOR.value,
+    SubagentProfileId.DEBUGGER.value,
+    SubagentProfileId.BROWSER_VERIFIER.value,
+]
+
+
+def test_subagent_profile_scope_validation_and_tool_filtering():
+    assert (
+        validate_subagent_profile_scope(
+            agent_profile="browser_verifier",
+            write_scope_json={"paths": ["src"]},
+        )
+        is not None
+    )
+    assert (
+        validate_subagent_profile_scope(
+            agent_profile="frontend_editor",
+            write_scope_json=None,
+        )
+        is not None
+    )
+    assert (
+        validate_subagent_profile_scope(
+            agent_profile="frontend_editor",
+            write_scope_json={"paths": ["src"]},
+        )
+        is None
+    )
+
+    tools = [
+        {"name": "read_file"},
+        {"name": "write_file"},
+        {"name": "start_server"},
+        {"name": "browser_snapshot"},
+    ]
+    filtered = filter_subagent_tools_for_profile(
+        tools,
+        agent_profile="browser_verifier",
+    )
+    assert [tool["name"] for tool in filtered] == [
+        "read_file",
+        "start_server",
+        "browser_snapshot",
+    ]
 
 
 class _InMemorySubagentTasks:

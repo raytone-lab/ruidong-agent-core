@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Protocol, runtime_checkable
@@ -54,6 +54,37 @@ def normalize_write_scope_paths(write_scope_json: Mapping[str, Any] | None) -> l
     return paths
 
 
+def normalize_subagent_scope_path(path: str) -> str:
+    normalized = str(path or "").strip().replace("\\", "/")
+    while normalized.startswith("./"):
+        normalized = normalized[2:]
+    return normalized.strip("/")
+
+
+def is_path_in_write_scope(path: str, scope_paths: Sequence[str]) -> bool:
+    normalized = normalize_subagent_scope_path(path)
+    if not normalized:
+        return False
+    return any(
+        normalized == scope_path or normalized.startswith(f"{scope_path}/")
+        for scope_path in scope_paths
+    )
+
+
+def find_write_scope_violations(
+    paths: Iterable[str],
+    write_scope_json: Mapping[str, Any] | None,
+) -> list[str]:
+    scope_paths = normalize_write_scope_paths(write_scope_json)
+    if not scope_paths:
+        return []
+    return [
+        path
+        for path in paths
+        if str(path or "").strip() and not is_path_in_write_scope(path, scope_paths)
+    ]
+
+
 def write_scopes_overlap(left: Sequence[str], right: Sequence[str]) -> bool:
     if not left or not right:
         return True
@@ -102,6 +133,7 @@ WRITE_TOOLS = (
 )
 DIAGNOSTIC_TOOLS = (
     "run_command",
+    "start_server",
     "get_preview_status",
     "get_server_logs",
     "run_tests",
@@ -221,6 +253,59 @@ def normalize_subagent_profile_id(raw_profile: str | None) -> str:
 
 def resolve_subagent_profile(raw_profile: str | None) -> SubagentProfile:
     return STANDARD_SUBAGENT_PROFILES[normalize_subagent_profile_id(raw_profile)]
+
+
+def subagent_profile_schema_values() -> list[str]:
+    return list(STANDARD_SUBAGENT_PROFILES.keys())
+
+
+def subagent_profile_allows_tool(
+    tool_name: str,
+    *,
+    agent_profile: str | None,
+) -> bool:
+    return resolve_subagent_profile(agent_profile).allows_tool(str(tool_name or ""))
+
+
+def filter_subagent_tools_for_profile[T](
+    tools: Iterable[T],
+    *,
+    agent_profile: str | None,
+) -> list[T]:
+    return [
+        tool
+        for tool in tools
+        if subagent_profile_allows_tool(
+            _tool_definition_name(tool),
+            agent_profile=agent_profile,
+        )
+    ]
+
+
+def validate_subagent_profile_scope(
+    *,
+    agent_profile: str | None,
+    write_scope_json: Mapping[str, Any] | None,
+) -> str | None:
+    profile = resolve_subagent_profile(agent_profile)
+    scope_paths = normalize_write_scope_paths(write_scope_json)
+    if profile.profile_id == SubagentProfileId.BROWSER_VERIFIER.value and scope_paths:
+        return (
+            "browser_verifier 子任务需要执行构建、启动和浏览器验证，"
+            "write_scope 必须留空，由系统串行保护执行"
+        )
+    if profile.requires_write_scope and not scope_paths:
+        return (
+            f"{profile.profile_id} 子任务必须声明 write_scope，"
+            "否则无法安全并行或限制写入范围"
+        )
+    return None
+
+
+def _tool_definition_name(tool: Any) -> str:
+    if isinstance(tool, Mapping):
+        return str(tool.get("name") or "")
+    return str(getattr(tool, "name", "") or "")
 
 
 @dataclass(frozen=True)

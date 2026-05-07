@@ -83,9 +83,16 @@ from .subagent import (
     SubagentTaskRecord,
     SubagentTaskSpec,
     SubagentTaskStatus,
+    filter_subagent_tools_for_profile,
+    find_write_scope_violations,
+    is_path_in_write_scope,
     normalize_subagent_profile_id,
+    normalize_subagent_scope_path,
     normalize_write_scope_paths,
     resolve_subagent_profile,
+    subagent_profile_allows_tool,
+    subagent_profile_schema_values,
+    validate_subagent_profile_scope,
     write_scopes_overlap,
 )
 from .subagent_delegation import (
@@ -148,7 +155,7 @@ from .workspace import (
     should_merge_subagent_workspace,
 )
 
-__version__ = "1.10.0"
+__version__ = "1.11.0"
 SCHEMA_VERSION = "1.2.0"
 
 __all__ = [
@@ -257,18 +264,25 @@ __all__ = [
     "decide_subagent_delegation",
     "decide_subagent_workspace_isolation",
     "extract_subagent_changed_paths",
+    "filter_subagent_tools_for_profile",
     "first_failed_tool_error_type",
+    "find_write_scope_violations",
     "format_subagent_aggregate",
+    "is_path_in_write_scope",
     "is_continuable_stop_reason",
     "is_terminal_wait_stop_reason",
     "needs_attention_for_stop_reason",
     "normalize_usage",
     "normalize_subagent_profile_id",
+    "normalize_subagent_scope_path",
     "normalize_subagent_tool_history",
     "normalize_subagent_tool_history_entry",
     "normalize_write_scope_paths",
     "resolve_subagent_profile",
     "should_auto_continue_run",
     "should_merge_subagent_workspace",
+    "subagent_profile_allows_tool",
+    "subagent_profile_schema_values",
+    "validate_subagent_profile_scope",
     "write_scopes_overlap",
 ]
