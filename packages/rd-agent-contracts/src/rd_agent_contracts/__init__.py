@@ -88,6 +88,11 @@ from .subagent import (
     resolve_subagent_profile,
     write_scopes_overlap,
 )
+from .subagent_delegation import (
+    SubagentDelegationContext,
+    SubagentDelegationDecision,
+    decide_subagent_delegation,
+)
 from .subagent_runtime import (
     MUTATING_TOOLS,
     VERIFIER_VALIDATION_TOOLS,
@@ -143,7 +148,7 @@ from .workspace import (
     should_merge_subagent_workspace,
 )
 
-__version__ = "1.9.0"
+__version__ = "1.10.0"
 SCHEMA_VERSION = "1.2.0"
 
 __all__ = [
@@ -198,6 +203,8 @@ __all__ = [
     "SubagentProfileId",
     "SubagentFinalizeDecision",
     "SubagentFinalizeOperation",
+    "SubagentDelegationContext",
+    "SubagentDelegationDecision",
     "SubagentRunPort",
     "SubagentRunRecord",
     "SubagentTaskPort",
@@ -247,6 +254,7 @@ __all__ = [
     "build_subagent_task_payload",
     "completion_status_for_stop_reason",
     "decide_subagent_finalization",
+    "decide_subagent_delegation",
     "decide_subagent_workspace_isolation",
     "extract_subagent_changed_paths",
     "first_failed_tool_error_type",
