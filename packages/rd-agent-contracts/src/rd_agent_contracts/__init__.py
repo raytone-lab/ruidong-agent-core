@@ -126,6 +126,7 @@ from .timeline import (
     TimelineRun,
     TimelineSubagentTask,
 )
+from .trace import CostAttributionTags, LLMCallRecord, TraceContext
 from .tool_execution import (
     ToolDefinition,
     ToolExecutionContext,
@@ -172,6 +173,7 @@ __all__ = [
     "BudgetGate",
     "CancellationToken",
     "Clock",
+    "CostAttributionTags",
     "ContinuationJobRecord",
     "ContinuationJobSpec",
     "ContinuationJobStatus",
@@ -185,6 +187,7 @@ __all__ = [
     "InvalidToolCall",
     "Message",
     "MessageId",
+    "LLMCallRecord",
     "Meter",
     "MUTATING_TOOLS",
     "PolicyGate",
@@ -233,6 +236,7 @@ __all__ = [
     "TimelineRequest",
     "TimelineRun",
     "TimelineSubagentTask",
+    "TraceContext",
     "ToolDefinition",
     "ToolExecutionContext",
     "ToolExecutionRequest",

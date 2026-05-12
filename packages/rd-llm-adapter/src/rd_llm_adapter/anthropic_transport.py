@@ -19,6 +19,7 @@ class AnthropicNativeTransport:
         base_url: str,
         timeout: float,
         anthropic_version: str = ANTHROPIC_VERSION,
+        extra_headers: dict[str, str] | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         try:
             import httpx
@@ -31,6 +32,8 @@ class AnthropicNativeTransport:
             "content-type": "application/json",
             "accept": "text/event-stream",
         }
+        if extra_headers:
+            headers.update(extra_headers)
         async with httpx.AsyncClient(timeout=timeout) as client:
             async with client.stream(
                 "POST",

@@ -38,4 +38,5 @@ class Transport(Protocol):
         api_key: str,
         base_url: str,
         timeout: float,
+        extra_headers: dict[str, str] | None = None,
     ) -> AsyncIterator[Any]: ...

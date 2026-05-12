@@ -15,6 +15,7 @@ class OpenAICompatTransport:
         api_key: str,
         base_url: str,
         timeout: float,
+        extra_headers: dict[str, str] | None = None,
     ) -> AsyncIterator[Any]:
         try:
             from openai import AsyncOpenAI
@@ -23,7 +24,14 @@ class OpenAICompatTransport:
                 "openai package not installed. Run: pip install openai"
             ) from exc
 
-        client = AsyncOpenAI(api_key=api_key, base_url=base_url, timeout=timeout)
+        client_kwargs: dict[str, Any] = {
+            "api_key": api_key,
+            "base_url": base_url,
+            "timeout": timeout,
+        }
+        if extra_headers:
+            client_kwargs["default_headers"] = extra_headers
+        client = AsyncOpenAI(**client_kwargs)
         try:
             stream = await client.chat.completions.create(**request_body)
             async for chunk in stream:
