@@ -60,3 +60,26 @@ uv build --wheel packages/rd-agent-core
 ```
 
 Host 集成侧还必须有一条本地烟测，覆盖 `EventLogPort + RunPersistencePort + RunKernel + ToolExecutorPort` 的完整闭环。仓库内的 `packages/rd-agent-core/tests/test_local_host_smoke.py` 是最小参考实现。
+
+## Harness
+
+`rd_agent_core.testing` 提供可复用 harness，避免每个 host 重写私有假件：
+
+- `InMemoryEventLog`：带 per-run sequence 与 idempotency 的事件日志；
+- `InMemoryRunPersistence`：覆盖 `RunPersistencePort` 生命周期方法；
+- `ScriptedLLMClient`：用标准事件脚本模拟多轮 LLM；
+- `FunctionToolExecutor`：用 Python callable 注册工具 handler；
+- `AgentCoreHarness`：一键跑 `RunKernel`，并返回 run record、kernel result 与完整事件流。
+
+最小用法：
+
+```python
+from rd_agent_core.testing import AgentCoreHarness, FunctionToolExecutor, ScriptedLLMClient
+
+harness = AgentCoreHarness(
+    llm_client=ScriptedLLMClient([first_turn_events, second_turn_events]),
+    tool_executor=FunctionToolExecutor({"lookup": lookup_handler}),
+)
+result = await harness.run(run_id="run-local", tools=[lookup_definition])
+assert result.completed.stop_reason == "end_turn"
+```
