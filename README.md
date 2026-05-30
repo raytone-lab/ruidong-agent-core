@@ -28,7 +28,9 @@ ruidong-agent-core/
 
 ## 设计文档
 
-`docs/superpowers/specs/2026-04-28-paas-runtime-design.md`（在 codesphere-saas 仓库）
+- `docs/agent-core-abstraction.md`：core 的抽象边界与 SaaS 接入方式。
+- `docs/HOST-INTEGRATION-CONTRACT.md`：host 接入契约、职责分界与 release gate。
+- `docs/superpowers/specs/2026-04-28-paas-runtime-design.md`（在 codesphere-saas 仓库）。
 
 ## 开发
 

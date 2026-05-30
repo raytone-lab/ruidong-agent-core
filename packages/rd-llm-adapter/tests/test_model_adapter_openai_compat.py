@@ -488,6 +488,46 @@ def test_parser_preserves_invalid_tool_call_raw_arguments_in_legacy_output() -> 
     assert terminal_events_from_turn_done(turn_done)[0]["raw_args"] == '{"questions":'
 
 
+def test_parser_finalize_on_error_preserves_partial_output() -> None:
+    session = OpenAICompatParserSession()
+
+    events = []
+    events.extend(
+        session.feed(
+            _chunk(
+                reasoning="thinking ",
+                content="partial ",
+                tool_calls=[
+                    _tool_delta(
+                        call_id="call_partial",
+                        name="search",
+                        arguments='{"q"',
+                    )
+                ],
+            )
+        )
+    )
+
+    assert session.has_partial_output is True
+
+    events.extend(session.finalize_on_error())
+
+    end = next(event for event in events if isinstance(event, ToolCallEnd))
+    assert end.call_id == "call_partial"
+    assert end.parsed_input is None
+    assert end.parse_error
+
+    turn_done = next(event for event in events if isinstance(event, TurnDone))
+    assert turn_done.stop_reason == "error"
+    assert turn_done.raw_stop_reason == "error"
+    assert turn_done.reasoning_blocks[0].text == "thinking "
+    assert turn_done.text_blocks[0].text == "partial "
+    assert [invalid.id for invalid in turn_done.invalid_tool_calls] == ["call_partial"]
+    assert turn_done.tool_calls == []
+    assert not any(isinstance(block, ToolUseBlock) for block in turn_done.content)
+    assert list(session.finalize_on_error()) == []
+
+
 def test_parser_keeps_legacy_tool_name_assignment_behavior() -> None:
     session = OpenAICompatParserSession()
 

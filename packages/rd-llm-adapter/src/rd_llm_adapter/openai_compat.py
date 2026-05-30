@@ -212,7 +212,9 @@ class OpenAICompatParserSession:
 
     @property
     def has_partial_output(self) -> bool:
-        return bool(self.text_buffer or self.reasoning_buffer)
+        return bool(
+            self.text_buffer or self.reasoning_buffer or self.tool_calls_by_index
+        )
 
     def feed(self, chunk: Any) -> Iterable[StandardEvent]:
         parsed = normalize_usage(_field(chunk, "usage"))
@@ -316,53 +318,98 @@ class OpenAICompatParserSession:
             return
         self.turn_done_emitted = True
 
+        content_blocks = self._content_blocks_from_buffers()
+
+        for idx in sorted(self.tool_calls_by_index.keys()):
+            event, block = self._finalize_tool_entry(
+                idx, self.tool_calls_by_index[idx]
+            )
+            yield event
+            content_blocks.append(block)
+
+        yield self._build_turn_done(
+            content_blocks=content_blocks,
+            stop_reason=_map_finish_reason(self.finish_reason),
+            raw_stop_reason=self.finish_reason or "",
+        )
+
+    def finalize_on_error(self) -> Iterable[StandardEvent]:
+        if self.turn_done_emitted:
+            return
+        if not self.has_partial_output:
+            return
+        self.turn_done_emitted = True
+
+        content_blocks = self._content_blocks_from_buffers()
+        for idx in sorted(self.tool_calls_by_index.keys()):
+            event, block = self._finalize_tool_entry(
+                idx, self.tool_calls_by_index[idx]
+            )
+            yield event
+            content_blocks.append(block)
+
+        yield self._build_turn_done(
+            content_blocks=content_blocks,
+            stop_reason="error",
+            raw_stop_reason="error",
+        )
+
+    def _content_blocks_from_buffers(self) -> list[Any]:
         content_blocks: list[Any] = []
         if self.reasoning_buffer:
             content_blocks.append(ReasoningBlock(text=self.reasoning_buffer))
         if self.text_buffer:
             content_blocks.append(TextBlock(text=self.text_buffer))
+        return content_blocks
 
-        for idx in sorted(self.tool_calls_by_index.keys()):
-            entry = self.tool_calls_by_index[idx]
-            raw_args = entry["arguments"]
-            parse_error = None
-            parsed_input: dict[str, Any] | None
-            try:
-                parsed = json.loads(raw_args) if raw_args else {}
-                if not isinstance(parsed, dict):
-                    raise ValueError("tool arguments must decode to a JSON object")
-                parsed_input = parsed
-            except (json.JSONDecodeError, TypeError, ValueError) as exc:
-                parsed_input = None
-                parse_error = str(exc)
+    def _finalize_tool_entry(
+        self,
+        idx: int,
+        entry: dict[str, Any],
+    ) -> tuple[ToolCallEnd, ToolUseBlock | InvalidToolCall]:
+        raw_args = str(entry.get("arguments") or "")
+        parsed_input: dict[str, Any] | None
+        parse_error: str | None = None
+        try:
+            parsed = json.loads(raw_args) if raw_args else {}
+            if not isinstance(parsed, dict):
+                raise ValueError("tool arguments must decode to a JSON object")
+            parsed_input = parsed
+        except (json.JSONDecodeError, TypeError, ValueError) as exc:
+            parsed_input = None
+            parse_error = str(exc)
 
-            yield ToolCallEnd(
-                call_id=entry["id"],
-                name=entry["name"],
-                index=idx,
-                encoding="native_json",
-                raw_args=raw_args,
-                parsed_input=parsed_input,
-                parse_error=parse_error,
-            )
-            if parse_error is None and parsed_input is not None:
-                content_blocks.append(
-                    ToolUseBlock(id=entry["id"], name=entry["name"], input=parsed_input)
-                )
-            else:
-                content_blocks.append(
-                    InvalidToolCall(
-                        id=entry["id"],
-                        name=entry["name"],
-                        raw_args=raw_args,
-                        parse_error=parse_error or "invalid tool arguments",
-                        index=idx,
-                        encoding="native_json",
-                    )
-                )
+        call_id = str(entry.get("id") or "")
+        name = str(entry.get("name") or "")
+        event = ToolCallEnd(
+            call_id=call_id,
+            name=name,
+            index=idx,
+            encoding="native_json",
+            raw_args=raw_args,
+            parsed_input=parsed_input,
+            parse_error=parse_error,
+        )
+        if parse_error is None and parsed_input is not None:
+            return event, ToolUseBlock(id=call_id, name=name, input=parsed_input)
+        return event, InvalidToolCall(
+            id=call_id,
+            name=name,
+            raw_args=raw_args,
+            parse_error=parse_error or "invalid tool arguments",
+            index=idx,
+            encoding="native_json",
+        )
 
-        yield TurnDone(
-            stop_reason=_map_finish_reason(self.finish_reason),
+    def _build_turn_done(
+        self,
+        *,
+        content_blocks: list[Any],
+        stop_reason: str,
+        raw_stop_reason: str,
+    ) -> TurnDone:
+        return TurnDone(
+            stop_reason=stop_reason,
             content=content_blocks,
             text_blocks=[b for b in content_blocks if isinstance(b, TextBlock)],
             reasoning_blocks=[
@@ -381,11 +428,8 @@ class OpenAICompatParserSession:
             sources=[],
             usage=self.usage,
             provider_state=None,
-            raw_stop_reason=self.finish_reason or "",
+            raw_stop_reason=raw_stop_reason,
         )
-
-    def finalize_on_error(self) -> Iterable[StandardEvent]:
-        return iter(())
 
 
 def _map_finish_reason(finish_reason: str | None) -> str:
