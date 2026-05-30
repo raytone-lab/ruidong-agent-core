@@ -165,7 +165,7 @@ from .workspace import (
     should_merge_subagent_workspace,
 )
 
-__version__ = "1.13.0"
+__version__ = "1.14.0"
 
 __all__ = [
     "SCHEMA_VERSION",

@@ -1,10 +1,10 @@
 [project]
 name = "rd-llm-adapter"
-version = "1.1.0"
+version = "1.1.1"
 description = "LLM provider adapter layer (low-level: protocols + adapters + parser sessions)"
 requires-python = ">=3.12"
 dependencies = [
-    "rd-agent-contracts>=1.13.0,<2.0.0",
+    "rd-agent-contracts>=1.14.0,<2.0.0",
 ]
 
 [project.optional-dependencies]

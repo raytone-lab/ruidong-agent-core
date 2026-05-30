@@ -1,6 +1,6 @@
 """Model adapter primitives used by the AgentRunner LLM boundary."""
 
-__version__ = "1.1.0"
+__version__ = "1.1.1"
 
 from .anthropic_native import AnthropicNativeAdapter
 from .anthropic_transport import AnthropicNativeTransport

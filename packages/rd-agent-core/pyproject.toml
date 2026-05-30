@@ -4,8 +4,8 @@ version = "0.1.0"
 description = "Host-neutral agent runtime kernel and business adapter contracts"
 requires-python = ">=3.12"
 dependencies = [
-    "rd-agent-contracts>=1.13.0,<2.0.0",
-    "rd-llm-adapter>=1.1.0,<2.0.0",
+    "rd-agent-contracts>=1.14.0,<2.0.0",
+    "rd-llm-adapter>=1.1.1,<2.0.0",
 ]
 
 [project.optional-dependencies]
