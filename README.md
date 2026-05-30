@@ -31,6 +31,8 @@ ruidong-agent-core/
 
 - `docs/agent-core-abstraction.md`：core 的抽象边界与 SaaS 接入方式。
 - `docs/HOST-INTEGRATION-CONTRACT.md`：host 接入契约、职责分界与 release gate。
+- `docs/SDK-OVERVIEW.md`：底座定位、功能清单、架构分层与推荐接入路线。
+- `docs/API-REFERENCE.md`：当前 SDK 对外接口文档。
 - `docs/QUICKSTART.md`：安装、最小 harness 运行、host 接入顺序与发布验证命令。
 - `docs/superpowers/specs/2026-04-28-paas-runtime-design.md`（在 codesphere-saas 仓库）。
 
