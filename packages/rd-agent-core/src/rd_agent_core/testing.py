@@ -41,7 +41,7 @@ from rd_llm_adapter.events import StandardEvent
 from .events import CoreEventWriter
 from .policies import RunLimits
 from .run import RunKernel, RunKernelResult, RunRequest
-from .turn import TurnRequest
+from .turn import LLMClientPort, ToolExecutorLike, TurnRequest
 
 
 class DeterministicIdGenerator:
@@ -278,7 +278,15 @@ class InMemoryRunPersistence:
         engine_state_json: str | None,
         run_id: str | None,
     ) -> RunRecord:
-        resolved_run_id = run_id or f"run-{self._next_index}"
+        resolved_run_id = run_id
+        while resolved_run_id is None:
+            candidate = f"run-{self._next_index}"
+            if candidate not in self.records:
+                resolved_run_id = candidate
+            else:
+                self._next_index += 1
+        if resolved_run_id in self.records:
+            raise ValueError(f"run_id already exists: {resolved_run_id}")
         record = RunRecord(
             run_id=resolved_run_id,
             scope=scope,
@@ -385,8 +393,8 @@ class AgentCoreHarness:
     def __init__(
         self,
         *,
-        llm_client: ScriptedLLMClient,
-        tool_executor: FunctionToolExecutor | None = None,
+        llm_client: LLMClientPort,
+        tool_executor: ToolExecutorLike | None = None,
         event_log: InMemoryEventLog | None = None,
         persistence: InMemoryRunPersistence | None = None,
         id_generator: DeterministicIdGenerator | None = None,
@@ -404,7 +412,7 @@ class AgentCoreHarness:
     async def run(
         self,
         *,
-        run_id: str = "run-harness",
+        run_id: str | None = None,
         messages: Sequence[Message] = (),
         tools: Sequence[ToolDefinition] = (),
         tool_context: ToolExecutionContext | None = None,
@@ -437,11 +445,12 @@ class AgentCoreHarness:
             metadata={"session_id": resolved_scope.session_id},
         )
 
+        resolved_run_id = run_id or str(self.id_generator.run_id())
         run = self.persistence.create_root_run(
             scope=resolved_scope,
             budget=resolved_budget,
             max_continuations=max_continuations,
-            run_id=run_id,
+            run_id=resolved_run_id,
         )
         self.persistence.mark_running(run.run_id, started_at_ms=self.timestamp_ms + 1)
 

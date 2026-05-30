@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from hashlib import sha256
 from typing import Any
 
+from rd_agent_contracts import StopReason
+
 
 @dataclass(frozen=True)
 class RunLimits:
@@ -55,7 +57,11 @@ def evaluate_run_limits(limits: RunLimits, state: RunLimitState) -> RunLimitDeci
     if limits.max_tool_calls is not None and state.tool_calls_used >= limits.max_tool_calls:
         return RunLimitDecision(False, "max_tool_calls reached", "max_tool_calls")
     if limits.timeout_ms is not None and state.elapsed_ms >= limits.timeout_ms:
-        return RunLimitDecision(False, "timeout_ms reached", "timeout_ms")
+        return RunLimitDecision(
+            False,
+            "max_wall_clock reached",
+            StopReason.MAX_WALL_CLOCK.value,
+        )
     return RunLimitDecision(True)
 
 

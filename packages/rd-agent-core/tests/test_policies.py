@@ -29,6 +29,17 @@ def test_evaluate_run_limits_blocks_first_exhausted_limit() -> None:
     assert decision.limit_name == "max_turns"
 
 
+def test_evaluate_run_limits_uses_lifecycle_stop_reason_for_timeout() -> None:
+    decision = evaluate_run_limits(
+        RunLimits(timeout_ms=1000),
+        RunLimitState(elapsed_ms=1000),
+    )
+
+    assert not decision.allowed
+    assert decision.reason == "max_wall_clock reached"
+    assert decision.limit_name == "max_wall_clock"
+
+
 def test_tool_call_signature_is_stable_for_equivalent_inputs() -> None:
     first = tool_call_signature("write_file", {"path": "a.txt", "content": "x"})
     second = tool_call_signature("write_file", {"content": "x", "path": "a.txt"})

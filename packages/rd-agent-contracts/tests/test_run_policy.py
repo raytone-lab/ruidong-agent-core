@@ -17,6 +17,8 @@ def test_run_policy_stop_reason_sets_match_current_lifecycle_contract():
     assert NEEDS_ATTENTION_STOP_REASONS == frozenset(
         {
             "max_turns",
+            "max_wall_clock",
+            "timeout_ms",
             "loop_break:max_turns",
             "loop_break:no_progress",
             "loop_break:max_tool_calls",
@@ -33,6 +35,8 @@ def test_run_policy_stop_reason_predicates():
     assert is_terminal_wait_stop_reason("ask_user") is True
     assert needs_attention_for_stop_reason("loop_break:no_progress") is True
     assert needs_attention_for_stop_reason("loop_break:repeated_tool_call") is True
+    assert needs_attention_for_stop_reason("max_wall_clock") is True
+    assert needs_attention_for_stop_reason("timeout_ms") is True
 
     assert is_continuable_stop_reason("ask_user") is False
     assert is_terminal_wait_stop_reason("max_turns") is False
@@ -107,6 +111,20 @@ def test_completion_status_for_stop_reason():
     assert (
         completion_status_for_stop_reason(
             stop_reason="loop_break:repeated_tool_call",
+            can_auto_continue=False,
+        )
+        == RunStatus.NEEDS_ATTENTION
+    )
+    assert (
+        completion_status_for_stop_reason(
+            stop_reason="max_wall_clock",
+            can_auto_continue=False,
+        )
+        == RunStatus.NEEDS_ATTENTION
+    )
+    assert (
+        completion_status_for_stop_reason(
+            stop_reason="timeout_ms",
             can_auto_continue=False,
         )
         == RunStatus.NEEDS_ATTENTION

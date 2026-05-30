@@ -105,6 +105,7 @@ from .subagent import (
 from .subagent_delegation import (
     SubagentDelegationContext,
     SubagentDelegationDecision,
+    SubagentDelegationRuleSet,
     decide_subagent_delegation,
 )
 from .subagent_runtime import (
@@ -226,6 +227,7 @@ __all__ = [
     "SubagentFinalizeOperation",
     "SubagentDelegationContext",
     "SubagentDelegationDecision",
+    "SubagentDelegationRuleSet",
     "SubagentRunPort",
     "SubagentRunRecord",
     "SubagentTaskPort",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 from rd_agent_contracts import (
     EventDraft,
     RunBudget,
@@ -14,6 +15,7 @@ from rd_agent_contracts import (
 from rd_agent_core import CoreEventType
 from rd_agent_core.testing import (
     AgentCoreHarness,
+    DeterministicIdGenerator,
     FunctionToolExecutor,
     InMemoryEventLog,
     InMemoryRunPersistence,
@@ -151,5 +153,53 @@ def test_harness_run_persistence_links_continuations_to_parent() -> None:
     assert overflow is None
 
 
+def test_harness_run_persistence_rejects_duplicate_run_ids() -> None:
+    persistence = InMemoryRunPersistence()
+    budget = RunBudget(
+        max_turns=2,
+        max_tool_calls=2,
+        max_wall_clock_s=30,
+        total_timeout_s=60,
+    )
+    scope = RunScope(user_request_id="request-1", project_id="project-1")
+
+    persistence.create_root_run(run_id="run-1", scope=scope, budget=budget)
+
+    with pytest.raises(ValueError, match="run_id already exists"):
+        persistence.create_root_run(run_id="run-1", scope=scope, budget=budget)
+
+
+async def test_harness_default_run_ids_do_not_reuse_event_streams() -> None:
+    harness = AgentCoreHarness(
+        llm_client=ScriptedLLMClient([_final_turn_without_tool, _final_turn_without_tool]),
+        id_generator=DeterministicIdGenerator(),
+    )
+
+    first = await harness.run()
+    second = await harness.run()
+
+    assert first.run.run_id == "run-1"
+    assert second.run.run_id == "run-2"
+    assert {event.run_id for event in first.events} == {"run-1"}
+    assert {event.run_id for event in second.events} == {"run-2"}
+    assert first.events[0].seq == 1
+    assert second.events[0].seq == 1
+
+
 def _draft(event_type: str, payload: dict):
     return EventDraft(event_type=event_type, payload=payload, turn_id="turn-1")
+
+
+def _final_turn_without_tool(_request) -> list:
+    text = TextBlock("done")
+    return [
+        TurnDone(
+            stop_reason="end_turn",
+            content=[text],
+            text_blocks=[text],
+            reasoning_blocks=[],
+            tool_calls=[],
+            invalid_tool_calls=[],
+            raw_stop_reason="stop",
+        )
+    ]

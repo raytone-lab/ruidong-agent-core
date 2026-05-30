@@ -306,7 +306,7 @@ async def test_run_kernel_checks_timeout_before_followup_turn() -> None:
 
     result = await kernel.run(_request(limits=RunLimits(timeout_ms=100)))
 
-    assert result.stop_reason == "timeout_ms"
+    assert result.stop_reason == "max_wall_clock"
     assert result.turns_count == 1
 
 
@@ -338,7 +338,7 @@ async def test_run_kernel_blocks_on_exact_timeout_boundary() -> None:
 
     result = await kernel.run(_request(limits=RunLimits(timeout_ms=1000)))
 
-    assert result.stop_reason == "timeout_ms"
+    assert result.stop_reason == "max_wall_clock"
     assert result.turns_count == 1
 
 

@@ -11,7 +11,9 @@ CONTINUABLE_STOP_REASONS = frozenset({
 TERMINAL_WAIT_REASONS = frozenset({StopReason.ASK_USER.value})
 NEEDS_ATTENTION_STOP_REASONS = frozenset({
     StopReason.MAX_TURNS.value,
+    StopReason.MAX_WALL_CLOCK.value,
     StopReason.LOOP_BREAK_NO_PROGRESS.value,
+    "timeout_ms",
     "loop_break:max_turns",
     "loop_break:max_tool_calls",
     "loop_break:max_wall_clock",
