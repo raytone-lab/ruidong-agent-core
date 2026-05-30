@@ -46,6 +46,8 @@ MUTATING_TOOLS = frozenset(
     }
 )
 
+SUBAGENT_OUTCOME_SCHEMA_VERSION = "1.0"
+
 
 class SubagentFinalizeOperation(StrEnum):
     MARK_COMPLETED = "mark_completed"
@@ -181,7 +183,7 @@ def build_subagent_outcome_json(
     ]
     failed_entries = [entry for entry in entries if not entry.ok]
     return {
-        "schema_version": "1.0",
+        "schema_version": SUBAGENT_OUTCOME_SCHEMA_VERSION,
         "status": task_status,
         "summary": summary[:4000],
         "stop_reason": stop_reason,
@@ -413,7 +415,7 @@ def build_subagent_aggregate_outcome(
         validation_ok = None
 
     return {
-        "schema_version": "1.0",
+        "schema_version": SUBAGENT_OUTCOME_SCHEMA_VERSION,
         "kind": "subagent_aggregate",
         "status": aggregate_status,
         "total": len(children),

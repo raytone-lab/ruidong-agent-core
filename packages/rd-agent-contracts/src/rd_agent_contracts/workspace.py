@@ -61,6 +61,14 @@ def decide_subagent_workspace_isolation(
     workspace_isolation_enabled: bool,
     inline_parallel_enabled: bool,
 ) -> SubagentWorkspaceIsolationDecision:
+    """Decide whether a child agent should run in an isolated workspace.
+
+    The decision is intentionally ordered from broad host capability gates to
+    task-specific scope availability. ``reason`` identifies the first gate that
+    disabled isolation so callers can distinguish a configured-off runtime from
+    a subagent task that simply has no write scope.
+    """
+
     scope_paths = normalize_write_scope_paths(write_scope_json)
     if agent_kind != "subagent":
         return SubagentWorkspaceIsolationDecision(

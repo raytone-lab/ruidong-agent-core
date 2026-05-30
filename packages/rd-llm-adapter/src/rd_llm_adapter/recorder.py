@@ -527,7 +527,13 @@ def _normalize_actual_legacy_for_diff(expected: Any, actual: Any) -> Any:
                 normalized[key] = expected.get("reasoning_text", "")
                 continue
             if (
-                key in {"cached_input_tokens", "reasoning_tokens"}
+                key
+                in {
+                    "cached_input_tokens",
+                    "cache_read_input_tokens",
+                    "cache_creation_input_tokens",
+                    "reasoning_tokens",
+                }
                 and key not in expected
             ):
                 continue

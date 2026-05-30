@@ -4,6 +4,7 @@ version = "0.0.0"
 description = "Agent Runtime PaaS monorepo workspace root (not published)"
 requires-python = ">=3.12"
 dependencies = [
+    "rd-agent-core",
     "rd-agent-contracts",
     "rd-llm-adapter",
     "rd-llm-gateway",
@@ -15,6 +16,7 @@ dependencies = [
 members = ["packages/rd-*", "tools"]
 
 [tool.uv.sources]
+rd-agent-core = { workspace = true }
 rd-agent-contracts = { workspace = true }
 rd-llm-adapter = { workspace = true }
 rd-llm-gateway = { workspace = true }

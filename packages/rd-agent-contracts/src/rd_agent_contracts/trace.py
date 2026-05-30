@@ -4,7 +4,6 @@ from dataclasses import asdict, dataclass
 from datetime import datetime
 from typing import Any
 
-
 TRACE_HEADER_PREFIX = "X-RD-"
 
 

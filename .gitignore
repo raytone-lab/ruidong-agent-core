@@ -15,6 +15,9 @@ build/
 .venv/
 uv.lock
 
+# Local tool caches
+.npm-cache/
+
 # IDE
 .vscode/
 .idea/

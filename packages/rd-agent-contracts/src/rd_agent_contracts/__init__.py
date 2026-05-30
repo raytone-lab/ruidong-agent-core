@@ -13,6 +13,7 @@
 - SCHEMA_VERSION：data contract schema 版本，仅在 contract 字段/类型有 breaking change 时 bump
 """
 
+from ._version import SCHEMA_VERSION
 from .blob import BlobRef
 from .budget import BudgetEnvelope
 from .clock import Clock, FrozenClock, SystemClock
@@ -34,6 +35,12 @@ from .ids import (
     ToolUseId,
     TurnId,
     UuidIdGenerator,
+)
+from .managed_agent import (
+    ManagedAgentEventReadPort,
+    ManagedAgentEventReplay,
+    ManagedAgentRecoveryAssessment,
+    ManagedAgentRecoveryPort,
 )
 from .messages import Message, Role, ToolCall, ToolResult
 from .ports import (
@@ -126,7 +133,6 @@ from .timeline import (
     TimelineRun,
     TimelineSubagentTask,
 )
-from .trace import CostAttributionTags, LLMCallRecord, TraceContext
 from .tool_execution import (
     ToolDefinition,
     ToolExecutionContext,
@@ -137,6 +143,7 @@ from .tool_execution import (
     ToolObservabilityRecord,
     ToolRegistryPort,
 )
+from .trace import CostAttributionTags, LLMCallRecord, TraceContext
 from .transcript_blocks import (
     InvalidToolCall,
     ProviderState,
@@ -157,8 +164,7 @@ from .workspace import (
     should_merge_subagent_workspace,
 )
 
-__version__ = "1.12.0"
-SCHEMA_VERSION = "1.2.0"
+__version__ = "1.13.0"
 
 __all__ = [
     "SCHEMA_VERSION",
@@ -187,6 +193,10 @@ __all__ = [
     "InvalidToolCall",
     "Message",
     "MessageId",
+    "ManagedAgentEventReadPort",
+    "ManagedAgentEventReplay",
+    "ManagedAgentRecoveryAssessment",
+    "ManagedAgentRecoveryPort",
     "LLMCallRecord",
     "Meter",
     "MUTATING_TOOLS",

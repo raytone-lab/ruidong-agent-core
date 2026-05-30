@@ -39,7 +39,7 @@ class ReasoningBlock:
     """思维链 block。Anthropic thinking / redacted_thinking 的 first-class 表达。
 
     - 普通 thinking：text + signature（必须保留以支持 multi-turn）
-    - redacted_thinking：data（加密 blob）+ redacted=True
+    - redacted_thinking：data（provider 原始加密 blob 字符串）+ redacted=True
     - DeepSeek/Kimi/GLM 的 reasoning_content：text + signature=None + redacted=False
     """
     text: str = ""
@@ -48,6 +48,12 @@ class ReasoningBlock:
     redacted: bool = False
     data: str | None = None  # Anthropic redacted_thinking 的加密 blob
     provider_data: dict[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        if self.redacted and not self.data:
+            raise ValueError("redacted reasoning block requires data")
+        if self.data is not None and not self.redacted:
+            raise ValueError("reasoning block data is only valid when redacted=True")
 
 
 @dataclass(frozen=True)

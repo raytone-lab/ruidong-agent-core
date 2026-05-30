@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 from rd_agent_contracts.continuation_queue import (
     ContinuationJobRecord,
     ContinuationJobSpec,
@@ -226,6 +227,26 @@ def test_continuation_queue_protocol_runtime_check():
     port: ContinuationQueuePort = _InMemoryContinuationQueue()
 
     assert isinstance(port, ContinuationQueuePort)
+
+
+def test_continuation_job_record_validates_attempt_bounds():
+    base = {
+        "job_id": "job-1",
+        "user_request_id": "request-1",
+        "project_id": "project-1",
+        "previous_run_id": "run-prev",
+        "next_run_id": "run-next",
+        "status": ContinuationJobStatus.QUEUED,
+    }
+
+    with pytest.raises(ValueError, match="attempts"):
+        ContinuationJobRecord(**base, attempts=-1, max_attempts=1)
+
+    with pytest.raises(ValueError, match="max_attempts"):
+        ContinuationJobRecord(**base, attempts=0, max_attempts=0)
+
+    with pytest.raises(ValueError, match="attempts"):
+        ContinuationJobRecord(**base, attempts=2, max_attempts=1)
 
 
 def test_continuation_queue_idempotent_enqueue_and_claim_order():

@@ -35,6 +35,12 @@ class ContinuationJobSpec:
 
 @dataclass(frozen=True)
 class ContinuationJobRecord:
+    """Observable continuation job state.
+
+    ``attempts`` counts started execution attempts, incremented when a worker
+    begins processing through ``mark_attempt_started``.
+    """
+
     job_id: str
     user_request_id: str
     project_id: str
@@ -52,6 +58,14 @@ class ContinuationJobRecord:
     completed_at_ms: int | None = None
     created_at_ms: int | None = None
     updated_at_ms: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.attempts < 0:
+            raise ValueError("attempts must be >= 0")
+        if self.max_attempts < 1:
+            raise ValueError("max_attempts must be >= 1")
+        if self.attempts > self.max_attempts:
+            raise ValueError("attempts must be <= max_attempts")
 
 
 @runtime_checkable

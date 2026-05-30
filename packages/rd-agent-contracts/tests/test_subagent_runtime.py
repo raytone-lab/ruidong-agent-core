@@ -13,6 +13,7 @@ from rd_agent_contracts import (
     extract_subagent_changed_paths,
     format_subagent_aggregate,
 )
+from rd_agent_contracts.subagent_runtime import SUBAGENT_OUTCOME_SCHEMA_VERSION
 
 
 def test_subagent_instruction_text_includes_profile_scope_and_continuation():
@@ -59,6 +60,7 @@ def test_subagent_outcome_schema_extracts_paths_validation_and_errors():
         failure={"type": "max_tool_calls_reached", "code": "MAX_TOOL_CALLS_REACHED"},
     )
 
+    assert outcome["schema_version"] == SUBAGENT_OUTCOME_SCHEMA_VERSION
     assert outcome["changed_paths"] == ["client/src/App.tsx"]
     assert outcome["validation"]["ok"] is False
     assert outcome["validation"]["tools"][0]["name"] == "browser_snapshot"
@@ -203,6 +205,7 @@ def test_subagent_aggregate_outcome_preserves_child_order_and_structured_details
 
     aggregate = build_subagent_aggregate_outcome([completed, failed])
 
+    assert aggregate["schema_version"] == SUBAGENT_OUTCOME_SCHEMA_VERSION
     assert aggregate["kind"] == "subagent_aggregate"
     assert aggregate["status"] == "failed"
     assert aggregate["total"] == 2

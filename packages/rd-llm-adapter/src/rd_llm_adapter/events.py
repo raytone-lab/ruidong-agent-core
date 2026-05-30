@@ -93,8 +93,20 @@ class UsageUpdate:
     input_tokens: int = 0
     output_tokens: int = 0
     total_tokens: int = 0
+    cache_read_input_tokens: int = 0
+    cache_creation_input_tokens: int = 0
     cached_input_tokens: int = 0
     reasoning_tokens: int = 0
+
+    def __post_init__(self) -> None:
+        read_tokens = self.cache_read_input_tokens
+        creation_tokens = self.cache_creation_input_tokens
+        if self.cached_input_tokens and not (read_tokens or creation_tokens):
+            read_tokens = self.cached_input_tokens
+            object.__setattr__(self, "cache_read_input_tokens", read_tokens)
+        derived_cached_tokens = read_tokens + creation_tokens
+        if self.cached_input_tokens != derived_cached_tokens:
+            object.__setattr__(self, "cached_input_tokens", derived_cached_tokens)
 
     def to_dict(self) -> dict[str, int]:
         total = self.total_tokens or (self.input_tokens + self.output_tokens)
@@ -103,6 +115,10 @@ class UsageUpdate:
             "output_tokens": self.output_tokens,
             "total_tokens": total,
         }
+        if self.cache_read_input_tokens:
+            payload["cache_read_input_tokens"] = self.cache_read_input_tokens
+        if self.cache_creation_input_tokens:
+            payload["cache_creation_input_tokens"] = self.cache_creation_input_tokens
         if self.cached_input_tokens:
             payload["cached_input_tokens"] = self.cached_input_tokens
         if self.reasoning_tokens:

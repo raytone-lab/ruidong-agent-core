@@ -220,13 +220,16 @@ class OpenAICompatParserSession:
             parsed.input_tokens
             or parsed.output_tokens
             or parsed.cached_input_tokens
+            or parsed.cache_read_input_tokens
+            or parsed.cache_creation_input_tokens
             or parsed.reasoning_tokens
         ):
             self.usage = UsageUpdate(
                 input_tokens=parsed.input_tokens,
                 output_tokens=parsed.output_tokens,
                 total_tokens=parsed.total_tokens,
-                cached_input_tokens=parsed.cached_input_tokens,
+                cache_read_input_tokens=parsed.cache_read_input_tokens,
+                cache_creation_input_tokens=parsed.cache_creation_input_tokens,
                 reasoning_tokens=parsed.reasoning_tokens,
             )
             yield self.usage
@@ -269,7 +272,7 @@ class OpenAICompatParserSession:
                 )
                 self.tool_calls_by_index[idx] = {
                     "id": initial_id or "",
-                    "name": "",
+                    "name": initial_name or "",
                     "arguments": "",
                     "encoding": "native_json",
                 }
@@ -326,8 +329,10 @@ class OpenAICompatParserSession:
             parsed_input: dict[str, Any] | None
             try:
                 parsed = json.loads(raw_args) if raw_args else {}
-                parsed_input = parsed if isinstance(parsed, dict) else {}
-            except (json.JSONDecodeError, TypeError) as exc:
+                if not isinstance(parsed, dict):
+                    raise ValueError("tool arguments must decode to a JSON object")
+                parsed_input = parsed
+            except (json.JSONDecodeError, TypeError, ValueError) as exc:
                 parsed_input = None
                 parse_error = str(exc)
 

@@ -77,6 +77,7 @@ class AnthropicNativeParserSession:
         self.reasoning_state: dict[int, dict[str, Any]] = {}
         self.tool_state: dict[int, dict[str, Any]] = {}
         self.completed_blocks: list[Any] = []
+        self.completed_indices: set[int] = set()
         self.usage: UsageUpdate | None = None
         self.raw_stop_reason: str | None = None
         self.turn_done_emitted = False
@@ -129,7 +130,17 @@ class AnthropicNativeParserSession:
         yield self._build_turn_done()
 
     def finalize_on_error(self) -> Iterable[StandardEvent]:
-        return iter(())
+        if self.turn_done_emitted:
+            return
+        partial_events, partial_blocks = self._partial_error_output()
+        if not partial_blocks:
+            return
+        self.turn_done_emitted = True
+        yield from partial_events
+        yield self._build_turn_done(
+            content_blocks=partial_blocks,
+            raw_stop_reason="error",
+        )
 
     def _on_content_block_start(self, chunk: Any) -> Iterable[StandardEvent]:
         index = int(_field(chunk, "index", 0) or 0)
@@ -212,6 +223,7 @@ class AnthropicNativeParserSession:
             self.completed_blocks.append(
                 TextBlock(text=self.text_buffers.get(index, ""))
             )
+            self.completed_indices.add(index)
             return
         if block_kind in {"thinking", "redacted_thinking"}:
             state = self.reasoning_state[index]
@@ -223,75 +235,121 @@ class AnthropicNativeParserSession:
                     data=state.get("data"),
                 )
             )
+            self.completed_indices.add(index)
             return
         if block_kind == "tool_use":
             state = self.tool_state[index]
-            raw_args = str(state.get("args") or "")
-            parsed_input: dict[str, Any] | None
-            parse_error: str | None = None
-            try:
-                parsed = json.loads(raw_args) if raw_args else {}
-                parsed_input = parsed if isinstance(parsed, dict) else {}
-            except (json.JSONDecodeError, TypeError) as exc:
-                parsed_input = None
-                parse_error = str(exc)
+            event, block = _finalize_tool_state(index, state)
+            self.completed_blocks.append(block)
+            self.completed_indices.add(index)
+            yield event
 
-            if parsed_input is None:
-                self.completed_blocks.append(
-                    InvalidToolCall(
-                        id=str(state.get("id") or ""),
-                        name=str(state.get("name") or ""),
-                        raw_args=raw_args,
-                        parse_error=parse_error or "invalid tool arguments",
-                        index=index,
-                        encoding="native_json",
-                    )
-                )
-            else:
-                self.completed_blocks.append(
-                    ToolUseBlock(
-                        id=str(state.get("id") or ""),
-                        name=str(state.get("name") or ""),
-                        input=parsed_input,
-                    )
-                )
+    def _partial_error_output(self) -> tuple[list[StandardEvent], list[Any]]:
+        events: list[StandardEvent] = []
+        blocks = list(self.completed_blocks)
+        for index in sorted(self.block_kinds):
+            if index in self.completed_indices:
+                continue
+            block_kind = self.block_kinds.get(index)
+            if block_kind == "text":
+                text = self.text_buffers.get(index, "")
+                if text:
+                    blocks.append(TextBlock(text=text))
+                continue
+            if block_kind == "thinking":
+                state = self.reasoning_state.get(index) or {}
+                text = str(state.get("text") or "")
+                signature = state.get("signature")
+                if text or signature:
+                    blocks.append(ReasoningBlock(text=text, signature=signature))
+                continue
+            if block_kind == "redacted_thinking":
+                state = self.reasoning_state.get(index) or {}
+                data = state.get("data")
+                if data:
+                    blocks.append(ReasoningBlock(redacted=True, data=data))
+                continue
+            if block_kind == "tool_use":
+                state = self.tool_state.get(index)
+                if state is None:
+                    continue
+                event, block = _finalize_tool_state(index, state)
+                events.append(event)
+                blocks.append(block)
+        return events, blocks
 
-            yield ToolCallEnd(
-                call_id=str(state.get("id") or ""),
-                name=str(state.get("name") or ""),
-                index=index,
-                encoding="native_json",
-                raw_args=raw_args,
-                parsed_input=parsed_input,
-                parse_error=parse_error,
-            )
-
-    def _build_turn_done(self) -> TurnDone:
+    def _build_turn_done(
+        self,
+        *,
+        content_blocks: list[Any] | None = None,
+        raw_stop_reason: str | None = None,
+    ) -> TurnDone:
+        blocks = list(self.completed_blocks if content_blocks is None else content_blocks)
+        raw_reason = self.raw_stop_reason if raw_stop_reason is None else raw_stop_reason
         tool_calls = [
             StandardToolCall(id=block.id, name=block.name, input=block.input)
-            for block in self.completed_blocks
+            for block in blocks
             if isinstance(block, ToolUseBlock)
         ]
         return TurnDone(
-            stop_reason=_map_anthropic_stop_reason(self.raw_stop_reason),
-            content=list(self.completed_blocks),
+            stop_reason=_map_anthropic_stop_reason(raw_reason),
+            content=blocks,
             text_blocks=[
-                block for block in self.completed_blocks if isinstance(block, TextBlock)
+                block for block in blocks if isinstance(block, TextBlock)
             ],
             reasoning_blocks=[
                 block
-                for block in self.completed_blocks
+                for block in blocks
                 if isinstance(block, ReasoningBlock)
             ],
             tool_calls=tool_calls,
             invalid_tool_calls=[
                 block
-                for block in self.completed_blocks
+                for block in blocks
                 if isinstance(block, InvalidToolCall)
             ],
             usage=self.usage,
-            raw_stop_reason=self.raw_stop_reason or "",
+            raw_stop_reason=raw_reason or "",
         )
+
+
+def _finalize_tool_state(
+    index: int,
+    state: dict[str, Any],
+) -> tuple[ToolCallEnd, ToolUseBlock | InvalidToolCall]:
+    raw_args = str(state.get("args") or "")
+    parsed_input: dict[str, Any] | None
+    parse_error: str | None = None
+    try:
+        parsed = json.loads(raw_args) if raw_args else {}
+        if not isinstance(parsed, dict):
+            raise ValueError("tool arguments must decode to a JSON object")
+        parsed_input = parsed
+    except (json.JSONDecodeError, TypeError, ValueError) as exc:
+        parsed_input = None
+        parse_error = str(exc)
+
+    call_id = str(state.get("id") or "")
+    name = str(state.get("name") or "")
+    event = ToolCallEnd(
+        call_id=call_id,
+        name=name,
+        index=index,
+        encoding="native_json",
+        raw_args=raw_args,
+        parsed_input=parsed_input,
+        parse_error=parse_error,
+    )
+    if parsed_input is None:
+        return event, InvalidToolCall(
+            id=call_id,
+            name=name,
+            raw_args=raw_args,
+            parse_error=parse_error or "invalid tool arguments",
+            index=index,
+            encoding="native_json",
+        )
+    return event, ToolUseBlock(id=call_id, name=name, input=parsed_input)
 
 
 def _merge_usage(
@@ -302,19 +360,31 @@ def _merge_usage(
         return existing
     input_tokens = int(_field(raw_usage, "input_tokens", 0) or 0)
     output_tokens = int(_field(raw_usage, "output_tokens", 0) or 0)
-    cached_input_tokens = int(
-        _field(raw_usage, "cache_read_input_tokens", 0) or 0
-    ) + int(_field(raw_usage, "cache_creation_input_tokens", 0) or 0)
+    cache_read_input_tokens = int(_field(raw_usage, "cache_read_input_tokens", 0) or 0)
+    cache_creation_input_tokens = int(
+        _field(raw_usage, "cache_creation_input_tokens", 0) or 0
+    )
+    cached_input_tokens = int(_field(raw_usage, "cached_input_tokens", 0) or 0)
+    if cached_input_tokens and not (
+        cache_read_input_tokens or cache_creation_input_tokens
+    ):
+        cache_read_input_tokens = cached_input_tokens
     if existing is not None:
         input_tokens = input_tokens or existing.input_tokens
         output_tokens = output_tokens or existing.output_tokens
-        cached_input_tokens = cached_input_tokens or existing.cached_input_tokens
+        cache_read_input_tokens = (
+            cache_read_input_tokens or existing.cache_read_input_tokens
+        )
+        cache_creation_input_tokens = (
+            cache_creation_input_tokens or existing.cache_creation_input_tokens
+        )
     total_tokens = input_tokens + output_tokens
     return UsageUpdate(
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         total_tokens=total_tokens,
-        cached_input_tokens=cached_input_tokens,
+        cache_read_input_tokens=cache_read_input_tokens,
+        cache_creation_input_tokens=cache_creation_input_tokens,
     )
 
 

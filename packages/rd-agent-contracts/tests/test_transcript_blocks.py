@@ -54,6 +54,14 @@ def test_reasoning_block_redacted_data():
     assert block.signature is None
 
 
+def test_reasoning_block_requires_redacted_data_invariant():
+    with pytest.raises(ValueError, match="requires data"):
+        ReasoningBlock(redacted=True)
+
+    with pytest.raises(ValueError, match="only valid"):
+        ReasoningBlock(data="encrypted-blob-base64")
+
+
 def test_tool_use_block_basic():
     block = ToolUseBlock(
         id="toolu_abc",

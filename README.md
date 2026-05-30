@@ -6,8 +6,9 @@ Agent Runtime PaaS — 把 codesphere-saas 中的 agent 能力抽象为可被任
 
 Phase B 进行中。
 
-- `rd-agent-contracts`：当前开发版 `1.5.1`，新增 RunPersistencePort / EventLogPort / ContinuationQueuePort / SubagentTaskPort / TimelineReadPort / ToolRegistryPort 等 Agent lifecycle contract；`SCHEMA_VERSION` 仍为 `1.2.0`。
-- `rd-llm-adapter`：已从 `codesphere-saas` model_adapter 抽出，当前发布 tag 为 `rd-llm-adapter-v1.0.1`。
+- `rd-agent-contracts`：当前开发版 `1.13.0`，新增 RunPersistencePort / EventLogPort / ContinuationQueuePort / SubagentTaskPort / TimelineReadPort / ToolRegistryPort 等 Agent lifecycle contract；`SCHEMA_VERSION` 仍为 `1.2.0`。
+- `rd-agent-core`：新增 host-neutral turn/run kernel、业务 Agent adapter 协议、事件写入 facade、运行限制/重复工具调用策略；只依赖 contracts 与 llm adapter，不依赖 SaaS DB / 前端 / PPT 业务实现。
+- `rd-llm-adapter`：已从 `codesphere-saas` model_adapter 抽出，当前发布 tag 为 `rd-llm-adapter-v1.1.0`。
 - `rd-llm-gateway`：保留 Phase A v1 产物，暂不作为 Phase B engine 边界。
 - `rd-replay-evals` / `rd-tools`：保留 Phase A replay 和运维工具链。
 
@@ -17,6 +18,7 @@ Phase B 进行中。
 ruidong-agent-core/
 ├── packages/
 │   ├── rd-agent-contracts/    # P1 跨包共享协议（types/ports/event envelope）
+│   ├── rd-agent-core/         # Phase B host-neutral turn kernel + business adapter contracts
 │   ├── rd-llm-adapter/        # Phase B provider adapter + raw chunk replay
 │   ├── rd-llm-gateway/        # Phase A LLMProvider + stream chunk normalizer
 │   └── rd-replay-evals/       # P9 录制器 + replay 引擎 + golden traces

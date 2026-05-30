@@ -31,23 +31,35 @@ jobs:
           TAG="${GITHUB_REF#refs/tags/}"
           PKG=$(echo "$TAG" | sed -E 's/^(rd-.+)-v[0-9].+$/\1/')
           VERSION=$(echo "$TAG" | sed -E 's/^.+-v([0-9].+)$/\1/')
+          PKG_DIR="packages/$PKG"
+          if [ "$PKG" = "rd-tools" ]; then
+            PKG_DIR="tools"
+          fi
           echo "pkg=$PKG" >> $GITHUB_OUTPUT
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Parsed: pkg=$PKG, version=$VERSION"
+          echo "pkg_dir=$PKG_DIR" >> $GITHUB_OUTPUT
+          echo "Parsed: pkg=$PKG, version=$VERSION, pkg_dir=$PKG_DIR"
 
       - name: Verify package exists
         run: |
-          test -d "packages/${{ steps.parse.outputs.pkg }}" || {
-            echo "Package directory packages/${{ steps.parse.outputs.pkg }} not found"
+          test -d "${{ steps.parse.outputs.pkg_dir }}" || {
+            echo "Package directory ${{ steps.parse.outputs.pkg_dir }} not found"
             exit 1
           }
 
+      - name: Sync deps (含 dev tools)
+        run: uv sync --group dev
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Test
+        run: uv run pytest
+
       - name: Build wheel
         run: |
-          # uv workspace: 从 package 子目录跑 uv build，wheel 输出到 workspace root 的 dist/
-          cd "packages/${{ steps.parse.outputs.pkg }}"
-          uv build --wheel
-          ls -la ../../dist/
+          uv build --wheel "${{ steps.parse.outputs.pkg_dir }}"
+          ls -la dist/
 
       - name: Create release + upload wheel
         env:

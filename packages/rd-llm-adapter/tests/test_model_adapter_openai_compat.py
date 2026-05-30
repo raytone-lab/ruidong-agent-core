@@ -16,6 +16,7 @@ from rd_llm_adapter.events import (
     TurnDone,
     UsageUpdate,
 )
+from rd_llm_adapter.messages import InvalidToolCall, ToolUseBlock
 from rd_llm_adapter.openai_compat import (
     OpenAICompatAdapter,
     OpenAICompatParserSession,
@@ -376,6 +377,7 @@ def test_parser_preserves_usage_detail_tokens() -> None:
         "input_tokens": 0,
         "output_tokens": 5,
         "total_tokens": 5,
+        "cache_read_input_tokens": 123,
         "cached_input_tokens": 123,
         "reasoning_tokens": 4,
     }
@@ -384,6 +386,74 @@ def test_parser_preserves_usage_detail_tokens() -> None:
         turn_done, latency_ms=1, first_chunk_latency_ms=1
     )
     assert response["usage"] == usage.to_dict()
+
+
+def test_parser_marks_non_object_tool_arguments_invalid() -> None:
+    session = OpenAICompatParserSession()
+
+    events = []
+    events.extend(
+        session.feed(
+            _chunk(
+                tool_calls=[
+                    _tool_delta(
+                        call_id="call_array",
+                        name="search",
+                        arguments='["not", "an", "object"]',
+                    )
+                ],
+                finish_reason="tool_calls",
+            )
+        )
+    )
+    events.extend(session.finalize())
+
+    end = next(event for event in events if isinstance(event, ToolCallEnd))
+    assert end.parsed_input is None
+    assert end.parse_error == "tool arguments must decode to a JSON object"
+
+    turn_done = next(event for event in events if isinstance(event, TurnDone))
+    assert turn_done.tool_calls == []
+    assert turn_done.invalid_tool_calls[0].raw_args == '["not", "an", "object"]'
+
+
+def test_parser_isolates_invalid_and_valid_tool_calls_in_same_turn() -> None:
+    session = OpenAICompatParserSession()
+
+    events = []
+    events.extend(
+        session.feed(
+            _chunk(
+                tool_calls=[
+                    _tool_delta(
+                        index=0,
+                        call_id="call_bad",
+                        name="search",
+                        arguments='["not", "an", "object"]',
+                    ),
+                    _tool_delta(
+                        index=1,
+                        call_id="call_ok",
+                        name="read_file",
+                        arguments='{"path":"README.md"}',
+                    ),
+                ],
+                finish_reason="tool_calls",
+            )
+        )
+    )
+    events.extend(session.finalize())
+
+    turn_done = next(event for event in events if isinstance(event, TurnDone))
+
+    assert len(turn_done.content) == 2
+    assert isinstance(turn_done.content[0], InvalidToolCall)
+    assert turn_done.content[0].id == "call_bad"
+    assert isinstance(turn_done.content[1], ToolUseBlock)
+    assert turn_done.content[1].id == "call_ok"
+    assert turn_done.content[1].input == {"path": "README.md"}
+    assert [tool.id for tool in turn_done.tool_calls] == ["call_ok"]
+    assert [tool.id for tool in turn_done.invalid_tool_calls] == ["call_bad"]
 
 
 def test_parser_preserves_invalid_tool_call_raw_arguments_in_legacy_output() -> None:

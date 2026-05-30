@@ -10,9 +10,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-# 与 __init__.py 的 SCHEMA_VERSION 同值；放本地常量避免循环 import。
-# 升级 SCHEMA_VERSION 时**必须**同步本常量——否则新创建的 AgentEvent 会带 stale 版本号。
-_DEFAULT_SCHEMA_VERSION = "1.2.0"
+from ._version import SCHEMA_VERSION as _DEFAULT_SCHEMA_VERSION
 
 
 @dataclass(frozen=True)

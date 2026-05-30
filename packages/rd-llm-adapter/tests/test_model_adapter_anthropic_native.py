@@ -251,6 +251,44 @@ def test_anthropic_parser_preserves_thinking_signature_text_and_usage() -> None:
     assert turn_done.content[1].text == "hello"
 
 
+def test_anthropic_parser_preserves_cache_usage_breakdown() -> None:
+    session = AnthropicNativeParserSession()
+
+    events = _feed_all(
+        session,
+        [
+            {
+                "type": "message_start",
+                "message": {
+                    "usage": {
+                        "input_tokens": 10,
+                        "cache_read_input_tokens": 3,
+                        "cache_creation_input_tokens": 5,
+                    }
+                },
+            },
+            {
+                "type": "message_delta",
+                "usage": {"output_tokens": 7},
+            },
+            {"type": "message_stop"},
+        ],
+    )
+
+    usage_updates = [event for event in events if isinstance(event, UsageUpdate)]
+    assert usage_updates[-1].cache_read_input_tokens == 3
+    assert usage_updates[-1].cache_creation_input_tokens == 5
+    assert usage_updates[-1].cached_input_tokens == 8
+    assert usage_updates[-1].to_dict() == {
+        "input_tokens": 10,
+        "output_tokens": 7,
+        "total_tokens": 17,
+        "cache_read_input_tokens": 3,
+        "cache_creation_input_tokens": 5,
+        "cached_input_tokens": 8,
+    }
+
+
 def test_anthropic_parser_preserves_redacted_thinking_data() -> None:
     session = AnthropicNativeParserSession()
 
@@ -368,6 +406,102 @@ def test_anthropic_parser_invalid_tool_json_becomes_invalid_tool_call() -> None:
     assert turn_done.invalid_tool_calls[0].id == "toolu_bad"
 
 
+def test_anthropic_parser_non_object_tool_json_becomes_invalid_tool_call() -> None:
+    session = AnthropicNativeParserSession()
+
+    events = _feed_all(
+        session,
+        [
+            {
+                "type": "content_block_start",
+                "index": 0,
+                "content_block": {
+                    "type": "tool_use",
+                    "id": "toolu_array",
+                    "name": "search",
+                },
+            },
+            {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {
+                    "type": "input_json_delta",
+                    "partial_json": '["not", "an", "object"]',
+                },
+            },
+            {"type": "content_block_stop", "index": 0},
+            {"type": "message_stop"},
+        ],
+    )
+
+    end = next(event for event in events if isinstance(event, ToolCallEnd))
+    assert end.parsed_input is None
+    assert end.parse_error == "tool arguments must decode to a JSON object"
+
+    turn_done = next(event for event in events if isinstance(event, TurnDone))
+    assert turn_done.tool_calls == []
+    assert isinstance(turn_done.content[0], InvalidToolCall)
+    assert turn_done.content[0].raw_args == '["not", "an", "object"]'
+
+
+def test_anthropic_parser_isolates_invalid_and_valid_tool_calls_in_same_turn() -> None:
+    session = AnthropicNativeParserSession()
+
+    events = _feed_all(
+        session,
+        [
+            {
+                "type": "content_block_start",
+                "index": 0,
+                "content_block": {
+                    "type": "tool_use",
+                    "id": "toolu_bad",
+                    "name": "search",
+                },
+            },
+            {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {
+                    "type": "input_json_delta",
+                    "partial_json": '["not", "an", "object"]',
+                },
+            },
+            {"type": "content_block_stop", "index": 0},
+            {
+                "type": "content_block_start",
+                "index": 1,
+                "content_block": {
+                    "type": "tool_use",
+                    "id": "toolu_ok",
+                    "name": "read_file",
+                },
+            },
+            {
+                "type": "content_block_delta",
+                "index": 1,
+                "delta": {
+                    "type": "input_json_delta",
+                    "partial_json": '{"path":"README.md"}',
+                },
+            },
+            {"type": "content_block_stop", "index": 1},
+            {"type": "message_stop"},
+        ],
+    )
+
+    turn_done = next(event for event in events if isinstance(event, TurnDone))
+
+    assert len(turn_done.content) == 2
+    assert isinstance(turn_done.content[0], InvalidToolCall)
+    assert turn_done.content[0].id == "toolu_bad"
+    assert isinstance(turn_done.content[1], ToolUseBlock)
+    assert turn_done.content[1].id == "toolu_ok"
+    assert turn_done.content[1].input == {"path": "README.md"}
+    assert [tool.id for tool in turn_done.tool_calls] == ["toolu_ok"]
+    assert [tool.id for tool in turn_done.invalid_tool_calls] == ["toolu_bad"]
+
+
 def test_anthropic_parser_stream_error_raises_without_turn_done() -> None:
     session = AnthropicNativeParserSession()
 
@@ -382,3 +516,61 @@ def test_anthropic_parser_stream_error_raises_without_turn_done() -> None:
         )
 
     assert list(session.finalize_on_error()) == []
+
+
+def test_anthropic_parser_finalize_on_error_preserves_partial_output() -> None:
+    session = AnthropicNativeParserSession()
+
+    _feed_all(
+        session,
+        [
+            {
+                "type": "content_block_start",
+                "index": 0,
+                "content_block": {"type": "text", "text": ""},
+            },
+            {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "text_delta", "text": "partial text"},
+            },
+            {
+                "type": "content_block_start",
+                "index": 1,
+                "content_block": {
+                    "type": "tool_use",
+                    "id": "toolu_partial",
+                    "name": "search",
+                },
+            },
+            {
+                "type": "content_block_delta",
+                "index": 1,
+                "delta": {"type": "input_json_delta", "partial_json": '{"q"'},
+            },
+        ],
+    )
+    with pytest.raises(RuntimeError, match="connection reset"):
+        list(
+            session.feed(
+                {
+                    "type": "error",
+                    "error": {"message": "connection reset"},
+                }
+            )
+        )
+
+    events = list(session.finalize_on_error())
+
+    tool_end = next(event for event in events if isinstance(event, ToolCallEnd))
+    assert tool_end.call_id == "toolu_partial"
+    assert tool_end.parsed_input is None
+    assert tool_end.parse_error
+
+    turn_done = next(event for event in events if isinstance(event, TurnDone))
+    assert turn_done.stop_reason == "error"
+    assert turn_done.raw_stop_reason == "error"
+    assert isinstance(turn_done.content[0], TextBlock)
+    assert turn_done.content[0].text == "partial text"
+    assert isinstance(turn_done.content[1], InvalidToolCall)
+    assert turn_done.content[1].raw_args == '{"q"'

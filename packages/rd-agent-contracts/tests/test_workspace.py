@@ -72,6 +72,26 @@ def test_decide_subagent_workspace_isolation_normalizes_scope_and_reasons():
     assert disabled.enabled is False
     assert disabled.reason == "agent_kind_not_subagent"
 
+    configured_off = decide_subagent_workspace_isolation(
+        agent_kind="subagent",
+        write_scope_json={"paths": ["src"]},
+        workspace_isolation_enabled=False,
+        inline_parallel_enabled=True,
+    )
+    assert configured_off.enabled is False
+    assert configured_off.write_scope_paths == ["src"]
+    assert configured_off.reason == "workspace_isolation_disabled"
+
+    inline_parallel_off = decide_subagent_workspace_isolation(
+        agent_kind="subagent",
+        write_scope_json={"paths": ["src"]},
+        workspace_isolation_enabled=True,
+        inline_parallel_enabled=False,
+    )
+    assert inline_parallel_off.enabled is False
+    assert inline_parallel_off.write_scope_paths == ["src"]
+    assert inline_parallel_off.reason == "inline_parallel_disabled"
+
     no_scope = decide_subagent_workspace_isolation(
         agent_kind="subagent",
         write_scope_json=None,
