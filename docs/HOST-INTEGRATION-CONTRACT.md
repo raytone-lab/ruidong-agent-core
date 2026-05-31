@@ -57,6 +57,7 @@ uv run ruff check .
 uv build --wheel packages/rd-agent-contracts
 uv build --wheel packages/rd-llm-adapter
 uv build --wheel packages/rd-agent-core
+uv run python tools/scripts/verify_wheel_install.py rd-agent-core --dist-dir dist
 ```
 
 Host 集成侧还必须有一条本地烟测，覆盖 `EventLogPort + RunPersistencePort + RunKernel + ToolExecutorPort` 的完整闭环。仓库内的 `packages/rd-agent-core/tests/test_local_host_smoke.py` 是最小参考实现。

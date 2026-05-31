@@ -36,10 +36,20 @@ jobs:
       - name: Test
         run: uv run pytest
 
-      - name: Build wheel
+      - name: Build wheels
         run: |
+          rm -rf dist
+          uv build --wheel packages/rd-agent-contracts
+          uv build --wheel packages/rd-llm-adapter
+          uv build --wheel packages/rd-agent-core
+          uv build --wheel packages/rd-llm-gateway
+          uv build --wheel packages/rd-replay-evals
+          uv build --wheel tools
           uv build --wheel "${{ steps.parse.outputs.pkg_dir }}"
           ls -la dist/
+
+      - name: Verify wheel install smoke
+        run: uv run --no-sync python tools/scripts/verify_wheel_install.py "${{ steps.parse.outputs.pkg }}" --dist-dir dist
 
       - name: Create release + upload wheel
         env:
