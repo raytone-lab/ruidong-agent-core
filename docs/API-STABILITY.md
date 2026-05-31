@@ -8,7 +8,7 @@
 
 - `rd-agent-contracts==1.14.0`
 - `rd-llm-adapter==1.1.1`
-- `rd-agent-core==0.1.1`
+- `rd-agent-core==0.1.2`
 
 `rd-agent-contracts` 和 `rd-llm-adapter` 已经按 SemVer 风格维护。`rd-agent-core` 仍是 `0.x`，表示核心方向稳定，但运行 API 会根据真实 host 接入反馈继续收紧。
 
@@ -34,10 +34,17 @@
 - `RunKernel`
 - `RunRequest`
 - `RunKernelResult`
+- `AgentRunner`
+- `AgentRunnerRequest`
+- `AgentRunnerResult`
+- `OpenAICompatLLMClient`
+- `AnthropicNativeLLMClient`
+- `ProviderClientConfig`
 - `TurnKernel`
 - `TurnRequest`
 - `TurnKernelResult`
 - `CoreToolPolicy`
+- `ToolSafetyPolicy`
 - `RunLimits`
 - `BusinessAgentAdapter` 相关协议
 
@@ -119,4 +126,3 @@
 - example SQLite 表结构；
 - 测试 fixture；
 - 未出现在 `docs/API-REFERENCE.md` 的内部 helper。
-

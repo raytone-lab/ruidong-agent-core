@@ -10,7 +10,7 @@
 
 - `rd-agent-contracts` 定义跨包协议、数据结构和 host ports；
 - `rd-llm-adapter` 把不同 provider 的流式 chunk 归一成标准事件；
-- `rd-agent-core` 执行 turn/run kernel、工具调用、事件写入和运行策略；
+- `rd-agent-core` 执行 turn/run kernel、AgentRunner lifecycle facade、provider LLM client glue、工具调用、事件写入和运行策略；
 - `rd_agent_core.testing` 提供接入方可复用的本地 harness。
 
 ## 架构分层
@@ -75,6 +75,7 @@ flowchart TD
 - `max_tool_calls`
 - `timeout_ms` / `max_wall_clock`
 - repeated tool call 保护
+- tool allowlist/blocklist 和 mutating tool confirmation
 - pause tool 停止
 
 ### 4. 事件日志与可回放性
@@ -191,7 +192,13 @@ assert result.events
 
 更完整示例见 `docs/QUICKSTART.md`。
 
-### 方式 B：直接嵌入 RunKernel
+### 方式 B：使用 AgentRunner facade
+
+生产 host 可以使用 `AgentRunner` 接管标准 run lifecycle glue：创建 run、标记 running、调用 `RunKernel`、标记 completed/failed。
+
+`AgentRunner` 不拥有数据库事务；如果 host 需要把 run 状态、队列和会话状态做原子提交，应在 port 实现中处理事务，或直接使用 `RunKernel`。
+
+### 方式 C：直接嵌入 RunKernel
 
 生产 host 通常直接组装 `RunKernel`，注入自己的 LLM client、event log 和 tool executor。
 
@@ -236,7 +243,7 @@ my_run_persistence.mark_completed(
 )
 ```
 
-### 方式 C：低层使用 provider adapter
+### 方式 D：低层使用 provider adapter
 
 如果 host 已有自己的 agent loop，也可以只使用 `rd-llm-adapter` 做 provider 归一化。
 
@@ -292,6 +299,6 @@ else:
 
 - `rd-agent-contracts==1.14.0`
 - `rd-llm-adapter==1.1.1`
-- `rd-agent-core==0.1.1`
+- `rd-agent-core==0.1.2`
 
 `rd-agent-core` 仍是 `0.x`，表示 runtime API 已经有清晰边界和测试保护，但在公开 1.0 前仍可能根据 host 接入反馈做小幅调整。

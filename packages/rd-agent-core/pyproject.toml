@@ -1,6 +1,6 @@
 [project]
 name = "rd-agent-core"
-version = "0.1.1"
+version = "0.1.2"
 description = "Host-neutral agent runtime kernel and business adapter contracts"
 requires-python = ">=3.12"
 dependencies = [

@@ -14,9 +14,10 @@
 
 - `rd-agent-contracts-v1.14.0`
 - `rd-llm-adapter-v1.1.1`
-- `rd-agent-core-v0.1.1`
+- `rd-agent-core-v0.1.2`
 
 Release notes：
 
+- `rd-agent-core-v0.1.2.md`
 - `rd-agent-core-v0.1.1.md`
 - `rd-agent-core-v0.1.0.md`

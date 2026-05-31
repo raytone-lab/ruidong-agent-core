@@ -14,6 +14,11 @@ from .business import (
     VerificationPolicyPort,
 )
 from .events import CoreEventType, CoreEventWriter
+from .llm_clients import (
+    AnthropicNativeLLMClient,
+    OpenAICompatLLMClient,
+    ProviderClientConfig,
+)
 from .policies import (
     RunLimitDecision,
     RunLimits,
@@ -29,22 +34,28 @@ from .run import (
     RunRequest,
     build_messages_after_turn,
 )
+from .runner import AgentRunner, AgentRunnerRequest, AgentRunnerResult
 from .turn import (
     AsyncToolExecutorPort,
     CoreToolPolicy,
     LLMClientPort,
     ToolExecutorLike,
+    ToolSafetyPolicy,
     TurnKernel,
     TurnKernelResult,
     TurnRequest,
 )
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 
 __all__ = [
     "ArtifactDescriptor",
     "ArtifactExtractorPort",
     "ArtifactManifest",
+    "AgentRunner",
+    "AgentRunnerRequest",
+    "AgentRunnerResult",
+    "AnthropicNativeLLMClient",
     "BusinessAgentAdapter",
     "BusinessAgentProfile",
     "BusinessTask",
@@ -55,7 +66,9 @@ __all__ = [
     "CoreEventWriter",
     "CoreToolPolicy",
     "LLMClientPort",
+    "OpenAICompatLLMClient",
     "PromptSection",
+    "ProviderClientConfig",
     "RunLimitDecision",
     "RunKernel",
     "RunKernelResult",
@@ -64,6 +77,7 @@ __all__ = [
     "RunRequest",
     "ToolCallSignature",
     "ToolExecutorLike",
+    "ToolSafetyPolicy",
     "TurnKernel",
     "TurnKernelResult",
     "TurnRequest",

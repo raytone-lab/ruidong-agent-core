@@ -58,9 +58,57 @@ class TurnRequest:
 
 
 @dataclass(frozen=True)
+class ToolSafetyPolicy:
+    allowed_tool_names: frozenset[str] | None = None
+    blocked_tool_names: frozenset[str] = field(default_factory=frozenset)
+    require_confirmation_for_mutating_tools: bool = False
+    confirmed_tool_use_ids: frozenset[str] = field(default_factory=frozenset)
+
+    def evaluate(
+        self,
+        tool_call: ToolUseBlock,
+        declared_tools: Sequence[ToolDefinition],
+    ) -> ToolExecutionResult | None:
+        details = {"tool_name": tool_call.name, "tool_use_id": tool_call.id}
+        if tool_call.name in self.blocked_tool_names:
+            return _tool_policy_denial(
+                "tool_blocked",
+                "Tool call blocked by tool safety policy.",
+                details,
+            )
+        if (
+            self.allowed_tool_names is not None
+            and tool_call.name not in self.allowed_tool_names
+        ):
+            return _tool_policy_denial(
+                "tool_not_allowed",
+                "Tool call is not in the safety policy allowlist.",
+                details,
+            )
+
+        declared_tool = next(
+            (tool for tool in declared_tools if tool.name == tool_call.name),
+            None,
+        )
+        if (
+            declared_tool is not None
+            and declared_tool.mutates_workspace
+            and self.require_confirmation_for_mutating_tools
+            and tool_call.id not in self.confirmed_tool_use_ids
+        ):
+            return _tool_policy_denial(
+                "tool_confirmation_required",
+                "Mutating tool call requires host confirmation.",
+                details,
+            )
+        return None
+
+
+@dataclass(frozen=True)
 class CoreToolPolicy:
     pause_tool_names: frozenset[str] = field(default_factory=frozenset)
     pause_stop_reason: str = "pause_requested"
+    safety_policy: ToolSafetyPolicy = field(default_factory=ToolSafetyPolicy)
 
     def is_pause_tool(self, tool_name: str) -> bool:
         return tool_name in self.pause_tool_names
@@ -332,6 +380,13 @@ class TurnKernel:
                     "message": f"Tool is not declared for this turn: {tool_call.name}",
                 },
             )
+        elif (
+            safety_result := self._tool_policy.safety_policy.evaluate(
+                tool_call,
+                request.tools,
+            )
+        ) is not None:
+            result = safety_result
         elif self._tool_executor is None:
             result = ToolExecutionResult(
                 ok=False,
@@ -424,6 +479,18 @@ def _dataclass_payload(value: Any) -> dict[str, Any]:
     if is_dataclass(value):
         return asdict(value)
     return dict(value)
+
+
+def _tool_policy_denial(
+    error_type: str,
+    message: str,
+    details: dict[str, Any],
+) -> ToolExecutionResult:
+    return ToolExecutionResult(
+        ok=False,
+        content="",
+        error={"type": error_type, "message": message, "details": details},
+    )
 
 
 def _joined_content_text(content: Sequence[StandardContentBlock], block_type: str) -> str:

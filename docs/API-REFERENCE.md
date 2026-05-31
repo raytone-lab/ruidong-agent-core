@@ -8,9 +8,34 @@
 | --- | --- | --- |
 | `rd-agent-contracts` | `1.14.0` | 数据结构、运行合同、host ports |
 | `rd-llm-adapter` | `1.1.1` | Provider 请求构造、流式 chunk 解析、标准事件 |
-| `rd-agent-core` | `0.1.1` | Turn/Run kernel、事件写入、运行策略、业务 adapter 边界、testing harness |
+| `rd-agent-core` | `0.1.2` | Turn/Run kernel、AgentRunner、provider LLM client、事件写入、运行策略、业务 adapter 边界、testing harness |
 
 ## rd-agent-core
+
+### `AgentRunner`
+
+高层 lifecycle facade。适合 host 不想每次手写 create run、mark running、调用 `RunKernel`、mark completed/failed 的场景。
+
+```python
+AgentRunner(
+    *,
+    run_persistence: RunPersistencePort,
+    event_log: EventLogPort,
+    llm_client: LLMClientPort,
+    tool_executor: ToolExecutorLike | None = None,
+    tool_observability: ToolObservabilityPort | None = None,
+    tool_policy: CoreToolPolicy | None = None,
+    id_generator: IdGenerator | None = None,
+)
+```
+
+核心方法：
+
+```python
+result = await runner.run(AgentRunnerRequest(...))
+```
+
+`AgentRunner` 仍然不拥有数据库事务。需要强事务边界的 host 应在 port 实现中处理，或继续直接使用 `RunKernel`。
 
 ### `RunKernel`
 
@@ -236,10 +261,54 @@ RunLimits(
 CoreToolPolicy(
     pause_tool_names: frozenset[str] = frozenset(),
     pause_stop_reason: str = "pause_requested",
+    safety_policy: ToolSafetyPolicy = ToolSafetyPolicy(),
 )
 ```
 
 用于声明哪些工具执行成功后应停止当前 run，例如等待用户确认或外部异步任务。
+
+### `ToolSafetyPolicy`
+
+```python
+ToolSafetyPolicy(
+    allowed_tool_names: frozenset[str] | None = None,
+    blocked_tool_names: frozenset[str] = frozenset(),
+    require_confirmation_for_mutating_tools: bool = False,
+    confirmed_tool_use_ids: frozenset[str] = frozenset(),
+)
+```
+
+安全策略在工具 executor 之前执行。可能返回的 `error.type`：
+
+- `tool_blocked`
+- `tool_not_allowed`
+- `tool_confirmation_required`
+
+### Provider LLM clients
+
+参考 `LLMClientPort` 实现：
+
+```python
+ProviderClientConfig(
+    model: str,
+    api_key: str,
+    base_url: str,
+    timeout: float = 60.0,
+    max_tokens: int = 4096,
+    extra_headers: Mapping[str, str] | None = None,
+    profile: Any | None = None,
+)
+
+OpenAICompatLLMClient(config, supports_function_calling=True, supports_stream_usage=True)
+AnthropicNativeLLMClient(config, thinking_budget_tokens=None)
+```
+
+这些 client 负责：
+
+- 将 `TurnRequest.messages/tools` 转为 provider adapter 输入；
+- 调用 `rd-llm-adapter` transport；
+- 将 provider chunk 解析为 `StandardEvent`；
+- 异常时优先调用 `finalize_on_error()` 保留 partial output。
 
 ### Business adapter APIs
 
@@ -452,6 +521,7 @@ class EventLogPort(Protocol):
 
 - 同一 run 内 `seq` 必须单调递增；
 - 同一个 `idempotency_key` 重放必须返回原事件，不写重复事件。
+- core 事件 payload 详见 `docs/EVENT-PAYLOAD-SCHEMA.md`。
 
 ### Run persistence
 

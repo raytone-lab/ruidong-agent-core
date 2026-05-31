@@ -118,6 +118,13 @@ def smoke_code_for(package: WorkspacePackage) -> str:
 import asyncio
 
 from rd_agent_contracts import TextBlock
+from rd_agent_core import (
+    AgentRunner,
+    AnthropicNativeLLMClient,
+    OpenAICompatLLMClient,
+    ProviderClientConfig,
+    ToolSafetyPolicy,
+)
 from rd_agent_core.testing import AgentCoreHarness, ScriptedLLMClient
 from rd_llm_adapter import TurnDone
 
@@ -145,6 +152,11 @@ async def main():
 
 
 asyncio.run(main())
+assert AgentRunner
+assert AnthropicNativeLLMClient
+assert OpenAICompatLLMClient
+assert ProviderClientConfig
+assert ToolSafetyPolicy
 """
     if package.name == "rd-agent-contracts":
         return """

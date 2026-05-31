@@ -27,7 +27,7 @@ def test_discover_workspace_packages_includes_runtime_packages() -> None:
 
     assert packages["rd-agent-contracts"].version == "1.14.0"
     assert packages["rd-llm-adapter"].version == "1.1.1"
-    assert packages["rd-agent-core"].version == "0.1.1"
+    assert packages["rd-agent-core"].version == "0.1.2"
     assert packages["rd-tools"].package_dir == REPO_ROOT / "tools"
 
 
@@ -60,11 +60,11 @@ def test_find_wheel_uses_distribution_name_and_version(tmp_path: Path) -> None:
     module = _load_module()
     package = module.WorkspacePackage(
         name="rd-agent-core",
-        version="0.1.1",
+        version="0.1.2",
         package_dir=REPO_ROOT / "packages" / "rd-agent-core",
         dependencies=(),
     )
-    wheel = tmp_path / "rd_agent_core-0.1.1-py3-none-any.whl"
+    wheel = tmp_path / "rd_agent_core-0.1.2-py3-none-any.whl"
     wheel.write_text("", encoding="utf-8")
 
     assert module.find_wheel(package, dist_dir=tmp_path) == wheel
@@ -74,7 +74,7 @@ def test_find_wheel_rejects_missing_wheel(tmp_path: Path) -> None:
     module = _load_module()
     package = module.WorkspacePackage(
         name="rd-agent-core",
-        version="0.1.1",
+        version="0.1.2",
         package_dir=REPO_ROOT / "packages" / "rd-agent-core",
         dependencies=(),
     )
