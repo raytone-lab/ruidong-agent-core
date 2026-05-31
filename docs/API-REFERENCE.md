@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | `rd-agent-contracts` | `1.14.0` | 数据结构、运行合同、host ports |
 | `rd-llm-adapter` | `1.1.1` | Provider 请求构造、流式 chunk 解析、标准事件 |
-| `rd-agent-core` | `0.1.0` | Turn/Run kernel、事件写入、运行策略、业务 adapter 边界、testing harness |
+| `rd-agent-core` | `0.1.1` | Turn/Run kernel、事件写入、运行策略、业务 adapter 边界、testing harness |
 
 ## rd-agent-core
 
@@ -666,3 +666,20 @@ resolve_transport_for_profile(profile: Any) -> Any
 - `max_tool_calls` 生效；
 - event log idempotency；
 - run persistence continuation parent linkage。
+
+## Reference host
+
+`examples/reference_host` 提供一套可运行的 SQLite 示例，帮助接入方理解 host ports 的生产形态。
+
+包含：
+
+- `SQLiteEventLog`：实现 `EventLogPort`；
+- `SQLiteRunPersistence`：实现 `RunPersistencePort`；
+- `connect_sqlite_reference_host()`：创建共享 SQLite connection；
+- `python -m examples.reference_host.demo`：运行一条 deterministic single-tool demo。
+
+注意：
+
+- 这是 example-only，不是 SDK 稳定 API；
+- SQLite schema 不属于兼容性承诺；
+- 生产 host 应保留 port 语义，替换为自己的数据库、事务、队列、安全和观测实现。

@@ -39,7 +39,7 @@ target-version = "py312"
 select = ["E", "F", "I", "B", "UP", "N"]
 
 [tool.pytest.ini_options]
-testpaths = ["packages/*/tests", "tools/tests"]
+testpaths = ["packages/*/tests", "tools/tests", "examples/*/tests"]
 python_files = ["test_*.py"]
 asyncio_mode = "auto"
 # importlib 模式让相同文件名（如 test_smoke.py）在不同 tests/ 目录下不冲突

@@ -7,7 +7,7 @@ Agent Runtime PaaS — 把 codesphere-saas 中的 agent 能力抽象为可被任
 Phase B release candidate。
 
 - `rd-agent-contracts`：当前发布候选版 `1.14.0`，新增 RunPersistencePort / EventLogPort / ContinuationQueuePort / SubagentTaskPort / TimelineReadPort / ToolRegistryPort 等 Agent lifecycle contract；`SCHEMA_VERSION` 仍为 `1.2.0`。
-- `rd-agent-core`：首发候选版 `0.1.0`，提供 host-neutral turn/run kernel、业务 Agent adapter 协议、事件写入 facade、运行限制/重复工具调用策略；只依赖 contracts 与 llm adapter，不依赖 SaaS DB / 前端 / PPT 业务实现。
+- `rd-agent-core`：首发候选版 `0.1.1`，提供 host-neutral turn/run kernel、业务 Agent adapter 协议、事件写入 facade、运行限制/重复工具调用策略；只依赖 contracts 与 llm adapter，不依赖 SaaS DB / 前端 / PPT 业务实现。
 - `rd-agent-core.testing`：可复用 host integration harness，提供内存 event log/run persistence、脚本化 LLM、函数式工具执行器与端到端 run 入口。
 - `rd-llm-adapter`：当前发布候选版 `1.1.1`，已从 `codesphere-saas` model_adapter 抽出，并对 Anthropic/OpenAI partial error、usage normalize 与 replay 边界做了回归保护。
 - `rd-llm-gateway`：保留 Phase A v1 产物，暂不作为 Phase B engine 边界。
@@ -24,6 +24,7 @@ ruidong-agent-core/
 │   ├── rd-llm-gateway/        # Phase A LLMProvider + stream chunk normalizer
 │   └── rd-replay-evals/       # P9 录制器 + replay 引擎 + golden traces
 ├── tools/                     # 独立 CLI 工具（dump_run 等）
+├── examples/                  # 可运行 reference host 和接入示例
 └── pyproject.toml             # uv workspace root
 ```
 
@@ -33,7 +34,10 @@ ruidong-agent-core/
 - `docs/HOST-INTEGRATION-CONTRACT.md`：host 接入契约、职责分界与 release gate。
 - `docs/SDK-OVERVIEW.md`：底座定位、功能清单、架构分层与推荐接入路线。
 - `docs/API-REFERENCE.md`：当前 SDK 对外接口文档。
+- `docs/API-STABILITY.md`：0.x/1.x API 稳定性、兼容性与弃用策略。
 - `docs/QUICKSTART.md`：安装、最小 harness 运行、host 接入顺序与发布验证命令。
+- `examples/reference_host/README.md`：SQLite reference host 示例。
+- `docs/releases/README.md`：版本化文档和 release note 入口。
 - `docs/superpowers/specs/2026-04-28-paas-runtime-design.md`（在 codesphere-saas 仓库）。
 
 ## 开发

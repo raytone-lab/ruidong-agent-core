@@ -279,7 +279,7 @@ else:
 ## 推荐接入路线
 
 1. 先跑 `rd_agent_core.testing.AgentCoreHarness`，验证 text-only 和 single-tool。
-2. 实现生产 `EventLogPort`，确保 `seq` 和 idempotency 正确。
+2. 参考 `examples/reference_host` 实现生产 `EventLogPort`，确保 `seq` 和 idempotency 正确。
 3. 实现 `LLMClientPort`，把 provider adapter 输出接入 core。
 4. 实现 `ToolExecutorPort`，只接只读工具。
 5. 接 `RunKernel`，跑 text-only、single-tool、multi-turn、invalid-tool、max-tool-calls 五条 smoke。
@@ -292,6 +292,6 @@ else:
 
 - `rd-agent-contracts==1.14.0`
 - `rd-llm-adapter==1.1.1`
-- `rd-agent-core==0.1.0`
+- `rd-agent-core==0.1.1`
 
-`rd-agent-core` 仍是 `0.1.0`，表示 runtime API 已经有清晰边界和测试保护，但在公开 1.0 前仍可能根据 host 接入反馈做小幅调整。
+`rd-agent-core` 仍是 `0.x`，表示 runtime API 已经有清晰边界和测试保护，但在公开 1.0 前仍可能根据 host 接入反馈做小幅调整。

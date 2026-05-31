@@ -17,7 +17,7 @@ uv sync --all-extras
 ```bash
 uv add rd-agent-contracts==1.14.0
 uv add rd-llm-adapter==1.1.1
-uv add rd-agent-core==0.1.0
+uv add rd-agent-core==0.1.1
 ```
 
 如果包还没有发布到私有索引，可以从 GitHub Releases 下载对应 wheel 后本地安装。
@@ -73,6 +73,8 @@ assert result.events
 
 更完整的 single-tool、多轮、idempotency、continuation parent linkage 参考 `packages/rd-agent-core/tests/test_local_host_smoke.py`。
 
+如果需要看接近生产 host 的持久化形态，参考 `examples/reference_host`。它提供 SQLite 版 `EventLogPort` 和 `RunPersistencePort`，并包含一条可运行的 `RunKernel` 闭环 demo。
+
 ## Host 接入顺序
 
 1. 实现 `EventLogPort`，确保同一 run 内 `seq` 单调递增，并用 idempotency key 测重复 append。
@@ -96,4 +98,4 @@ uv build --wheel packages/rd-agent-core
 
 - `rd-agent-contracts-v1.14.0`
 - `rd-llm-adapter-v1.1.1`
-- `rd-agent-core-v0.1.0`
+- `rd-agent-core-v0.1.1`
