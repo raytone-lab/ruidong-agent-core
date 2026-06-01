@@ -3,14 +3,21 @@ from __future__ import annotations
 import pytest
 from rd_agent_contracts import (
     AgentKind,
+    ContinuationJobSpec,
+    ContinuationJobStatus,
     EventDraft,
     RunBudget,
     RunCompletion,
     RunScope,
     RunStatus,
 )
+from rd_agent_core.conformance import (
+    assert_event_log_port_conformance,
+    assert_run_persistence_port_conformance,
+)
 
 from examples.reference_host import connect_sqlite_reference_host
+from examples.reference_host.continuation_worker import ReferenceContinuationWorker
 from examples.reference_host.demo import run_demo
 
 
@@ -161,5 +168,88 @@ def test_sqlite_run_persistence_rejects_duplicate_run_id() -> None:
                 scope=scope,
                 budget=budget,
             )
+    finally:
+        host.close()
+
+
+def test_sqlite_ports_pass_core_conformance_checks() -> None:
+    host = connect_sqlite_reference_host()
+    try:
+        assert_event_log_port_conformance(host.event_log)
+        assert_run_persistence_port_conformance(host.persistence)
+    finally:
+        host.close()
+
+
+def test_sqlite_continuation_queue_claims_retries_and_dead_letters() -> None:
+    host = connect_sqlite_reference_host()
+    try:
+        job = host.continuation_queue.enqueue_for_run(
+            ContinuationJobSpec(
+                user_request_id="request-1",
+                project_id="project-1",
+                previous_run_id="run-1",
+                next_run_id="run-2",
+                max_attempts=2,
+            ),
+            job_id="job-1",
+        )
+
+        claimed = host.continuation_queue.claim_next(worker_id="worker-1")
+        assert claimed is not None
+        assert claimed.job_id == job.job_id
+        assert claimed.status == ContinuationJobStatus.RUNNING
+        started = host.continuation_queue.mark_attempt_started(job.job_id)
+        assert started is not None
+        assert started.attempts == 1
+
+        retry = host.continuation_queue.complete_failure(
+            job.job_id,
+            error="temporary",
+            retry_available_at_ms=1,
+        )
+        assert retry is not None
+        assert retry.status == ContinuationJobStatus.QUEUED
+        assert retry.last_error == "temporary"
+
+        claimed_again = host.continuation_queue.claim_next(
+            worker_id="worker-2",
+            available_at_ms=2,
+        )
+        assert claimed_again is not None
+        host.continuation_queue.mark_attempt_started(job.job_id)
+        dead = host.continuation_queue.complete_failure(job.job_id, error="final")
+        assert dead is not None
+        assert dead.status == ContinuationJobStatus.DEAD_LETTER
+        assert dead.last_error == "final"
+    finally:
+        host.close()
+
+
+async def test_reference_continuation_worker_completes_claimed_job() -> None:
+    host = connect_sqlite_reference_host()
+    handled: list[str] = []
+    try:
+        host.continuation_queue.enqueue_for_run(
+            ContinuationJobSpec(
+                user_request_id="request-1",
+                project_id="project-1",
+                previous_run_id="run-1",
+                next_run_id="run-2",
+            ),
+            job_id="job-worker",
+        )
+        worker = ReferenceContinuationWorker(
+            queue=host.continuation_queue,
+            worker_id="worker-1",
+            handler=lambda job: handled.append(job.job_id),
+        )
+
+        completed = await worker.run_once()
+
+        assert completed is not None
+        assert completed.status == ContinuationJobStatus.SUCCEEDED
+        assert completed.attempts == 1
+        assert handled == ["job-worker"]
     finally:
         host.close()

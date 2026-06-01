@@ -20,6 +20,9 @@ from typing import Any
 from rd_agent_contracts import (
     AgentEvent,
     AgentKind,
+    ContinuationJobRecord,
+    ContinuationJobSpec,
+    ContinuationJobStatus,
     EventDraft,
     RunBudget,
     RunCompletion,
@@ -38,10 +41,12 @@ def connect_sqlite_reference_host(
     connection.row_factory = sqlite3.Row
     event_log = SQLiteEventLog(connection)
     persistence = SQLiteRunPersistence(connection)
+    continuation_queue = SQLiteContinuationQueue(connection)
     return SQLiteReferenceHost(
         connection=connection,
         event_log=event_log,
         persistence=persistence,
+        continuation_queue=continuation_queue,
     )
 
 
@@ -50,6 +55,7 @@ class SQLiteReferenceHost:
     connection: sqlite3.Connection
     event_log: SQLiteEventLog
     persistence: SQLiteRunPersistence
+    continuation_queue: SQLiteContinuationQueue
 
     def close(self) -> None:
         self.connection.close()
@@ -451,6 +457,296 @@ class SQLiteRunPersistence:
             )
 
 
+class SQLiteContinuationQueue:
+    """SQLite ``ContinuationQueuePort`` example with retry and reclaim semantics."""
+
+    def __init__(self, connection: sqlite3.Connection) -> None:
+        self._connection = connection
+        self._connection.row_factory = sqlite3.Row
+        self._create_schema()
+
+    def enqueue_for_run(
+        self,
+        spec: ContinuationJobSpec,
+        *,
+        job_id: str | None = None,
+    ) -> ContinuationJobRecord:
+        record = ContinuationJobRecord(
+            job_id=job_id or f"job-{uuid.uuid4()}",
+            user_request_id=spec.user_request_id,
+            project_id=spec.project_id,
+            previous_run_id=spec.previous_run_id,
+            next_run_id=spec.next_run_id,
+            status=ContinuationJobStatus.QUEUED.value,
+            attempts=0,
+            max_attempts=spec.max_attempts,
+            correlation_id=spec.correlation_id,
+            available_at_ms=spec.available_at_ms,
+            created_at_ms=_now_ms(),
+            updated_at_ms=_now_ms(),
+        )
+        with self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO reference_continuation_jobs (
+                    job_id, user_request_id, project_id, previous_run_id, next_run_id,
+                    status, attempts, max_attempts, worker_id, last_error,
+                    correlation_id, available_at_ms, locked_at_ms, heartbeat_at_ms,
+                    completed_at_ms, created_at_ms, updated_at_ms
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                _continuation_job_params(record),
+            )
+        loaded = self.load_job(record.job_id)
+        if loaded is None:
+            raise RuntimeError(f"created continuation job disappeared: {record.job_id}")
+        return loaded
+
+    def claim_next(
+        self,
+        *,
+        worker_id: str,
+        available_at_ms: int | None = None,
+    ) -> ContinuationJobRecord | None:
+        cutoff_ms = available_at_ms if available_at_ms is not None else _now_ms()
+        with self._connection:
+            row = self._connection.execute(
+                """
+                SELECT *
+                FROM reference_continuation_jobs
+                WHERE status = ?
+                  AND (available_at_ms IS NULL OR available_at_ms <= ?)
+                ORDER BY created_at_ms ASC, job_id ASC
+                LIMIT 1
+                """,
+                (ContinuationJobStatus.QUEUED.value, cutoff_ms),
+            ).fetchone()
+            if row is None:
+                return None
+            now_ms = _now_ms()
+            self._connection.execute(
+                """
+                UPDATE reference_continuation_jobs
+                SET status = ?, worker_id = ?, locked_at_ms = ?,
+                    heartbeat_at_ms = ?, updated_at_ms = ?
+                WHERE job_id = ?
+                """,
+                (
+                    ContinuationJobStatus.RUNNING.value,
+                    worker_id,
+                    now_ms,
+                    now_ms,
+                    now_ms,
+                    row["job_id"],
+                ),
+            )
+        return self.load_job(str(row["job_id"]))
+
+    def mark_attempt_started(
+        self,
+        job_id: str,
+        *,
+        heartbeat_at_ms: int | None = None,
+    ) -> ContinuationJobRecord | None:
+        record = self.load_job(job_id)
+        if record is None:
+            return None
+        if record.status != ContinuationJobStatus.RUNNING.value:
+            return record
+        if record.attempts >= record.max_attempts:
+            return self._update(
+                record,
+                status=ContinuationJobStatus.DEAD_LETTER.value,
+                completed_at_ms=_now_ms(),
+            )
+        return self._update(
+            record,
+            attempts=record.attempts + 1,
+            heartbeat_at_ms=heartbeat_at_ms if heartbeat_at_ms is not None else _now_ms(),
+        )
+
+    def heartbeat(
+        self,
+        job_id: str,
+        *,
+        heartbeat_at_ms: int | None = None,
+    ) -> ContinuationJobRecord | None:
+        record = self.load_job(job_id)
+        if record is None:
+            return None
+        return self._update(
+            record,
+            heartbeat_at_ms=heartbeat_at_ms if heartbeat_at_ms is not None else _now_ms(),
+        )
+
+    def complete_success(
+        self,
+        job_id: str,
+        *,
+        completed_at_ms: int | None = None,
+    ) -> ContinuationJobRecord | None:
+        record = self.load_job(job_id)
+        if record is None:
+            return None
+        now_ms = completed_at_ms if completed_at_ms is not None else _now_ms()
+        return self._update(
+            record,
+            status=ContinuationJobStatus.SUCCEEDED.value,
+            completed_at_ms=now_ms,
+        )
+
+    def complete_failure(
+        self,
+        job_id: str,
+        *,
+        error: str,
+        retry_available_at_ms: int | None = None,
+        completed_at_ms: int | None = None,
+    ) -> ContinuationJobRecord | None:
+        record = self.load_job(job_id)
+        if record is None:
+            return None
+        if record.attempts < record.max_attempts:
+            return self.release_for_retry(
+                job_id,
+                error=error,
+                available_at_ms=retry_available_at_ms,
+            )
+        now_ms = completed_at_ms if completed_at_ms is not None else _now_ms()
+        return self._update(
+            record,
+            status=ContinuationJobStatus.DEAD_LETTER.value,
+            last_error=error,
+            completed_at_ms=now_ms,
+        )
+
+    def release_for_retry(
+        self,
+        job_id: str,
+        *,
+        error: str,
+        available_at_ms: int | None = None,
+    ) -> ContinuationJobRecord | None:
+        record = self.load_job(job_id)
+        if record is None:
+            return None
+        if record.attempts >= record.max_attempts:
+            return self._update(
+                record,
+                status=ContinuationJobStatus.DEAD_LETTER.value,
+                last_error=error,
+                completed_at_ms=_now_ms(),
+            )
+        return self._update(
+            record,
+            status=ContinuationJobStatus.QUEUED.value,
+            worker_id=None,
+            last_error=error,
+            available_at_ms=available_at_ms,
+            locked_at_ms=None,
+            heartbeat_at_ms=None,
+        )
+
+    def reclaim_stale(
+        self,
+        *,
+        stale_before_ms: int,
+    ) -> int:
+        rows = self._connection.execute(
+            """
+            SELECT *
+            FROM reference_continuation_jobs
+            WHERE status = ?
+              AND COALESCE(heartbeat_at_ms, locked_at_ms, created_at_ms, 0) < ?
+            """,
+            (ContinuationJobStatus.RUNNING.value, stale_before_ms),
+        ).fetchall()
+        for row in rows:
+            record = _continuation_job_from_row(row)
+            if record.attempts >= record.max_attempts:
+                self._update(
+                    record,
+                    status=ContinuationJobStatus.DEAD_LETTER.value,
+                    last_error="stale continuation job exceeded max attempts",
+                    completed_at_ms=_now_ms(),
+                )
+            else:
+                self._update(
+                    record,
+                    status=ContinuationJobStatus.QUEUED.value,
+                    worker_id=None,
+                    last_error="stale continuation job reclaimed",
+                    locked_at_ms=None,
+                    heartbeat_at_ms=None,
+                )
+        return len(rows)
+
+    def load_job(self, job_id: str) -> ContinuationJobRecord | None:
+        row = self._connection.execute(
+            "SELECT * FROM reference_continuation_jobs WHERE job_id = ?",
+            (job_id,),
+        ).fetchone()
+        return _continuation_job_from_row(row) if row is not None else None
+
+    def _update(self, record: ContinuationJobRecord, **changes: Any) -> ContinuationJobRecord:
+        updated = replace(record, updated_at_ms=_now_ms(), **changes)
+        with self._connection:
+            self._connection.execute(
+                """
+                UPDATE reference_continuation_jobs
+                SET user_request_id = ?,
+                    project_id = ?,
+                    previous_run_id = ?,
+                    next_run_id = ?,
+                    status = ?,
+                    attempts = ?,
+                    max_attempts = ?,
+                    worker_id = ?,
+                    last_error = ?,
+                    correlation_id = ?,
+                    available_at_ms = ?,
+                    locked_at_ms = ?,
+                    heartbeat_at_ms = ?,
+                    completed_at_ms = ?,
+                    created_at_ms = ?,
+                    updated_at_ms = ?
+                WHERE job_id = ?
+                """,
+                (*_continuation_job_params(updated)[1:], updated.job_id),
+            )
+        loaded = self.load_job(record.job_id)
+        if loaded is None:
+            raise RuntimeError(f"updated continuation job disappeared: {record.job_id}")
+        return loaded
+
+    def _create_schema(self) -> None:
+        with self._connection:
+            self._connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS reference_continuation_jobs (
+                    job_id TEXT PRIMARY KEY,
+                    user_request_id TEXT NOT NULL,
+                    project_id TEXT NOT NULL,
+                    previous_run_id TEXT NOT NULL,
+                    next_run_id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    attempts INTEGER NOT NULL,
+                    max_attempts INTEGER NOT NULL,
+                    worker_id TEXT,
+                    last_error TEXT,
+                    correlation_id TEXT,
+                    available_at_ms INTEGER,
+                    locked_at_ms INTEGER,
+                    heartbeat_at_ms INTEGER,
+                    completed_at_ms INTEGER,
+                    created_at_ms INTEGER,
+                    updated_at_ms INTEGER
+                )
+                """
+            )
+
+
 def _now_ms() -> int:
     return time.time_ns() // 1_000_000
 
@@ -531,4 +827,48 @@ def _run_from_row(row: sqlite3.Row) -> RunRecord:
         created_at_ms=row["created_at_ms"],
         started_at_ms=row["started_at_ms"],
         completed_at_ms=row["completed_at_ms"],
+    )
+
+
+def _continuation_job_params(record: ContinuationJobRecord) -> tuple[Any, ...]:
+    return (
+        record.job_id,
+        record.user_request_id,
+        record.project_id,
+        record.previous_run_id,
+        record.next_run_id,
+        record.status,
+        record.attempts,
+        record.max_attempts,
+        record.worker_id,
+        record.last_error,
+        record.correlation_id,
+        record.available_at_ms,
+        record.locked_at_ms,
+        record.heartbeat_at_ms,
+        record.completed_at_ms,
+        record.created_at_ms,
+        record.updated_at_ms,
+    )
+
+
+def _continuation_job_from_row(row: sqlite3.Row) -> ContinuationJobRecord:
+    return ContinuationJobRecord(
+        job_id=str(row["job_id"]),
+        user_request_id=str(row["user_request_id"]),
+        project_id=str(row["project_id"]),
+        previous_run_id=str(row["previous_run_id"]),
+        next_run_id=str(row["next_run_id"]),
+        status=str(row["status"]),
+        attempts=int(row["attempts"]),
+        max_attempts=int(row["max_attempts"]),
+        worker_id=row["worker_id"],
+        last_error=row["last_error"],
+        correlation_id=row["correlation_id"],
+        available_at_ms=row["available_at_ms"],
+        locked_at_ms=row["locked_at_ms"],
+        heartbeat_at_ms=row["heartbeat_at_ms"],
+        completed_at_ms=row["completed_at_ms"],
+        created_at_ms=row["created_at_ms"],
+        updated_at_ms=row["updated_at_ms"],
     )

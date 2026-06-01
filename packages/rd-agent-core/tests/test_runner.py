@@ -63,14 +63,24 @@ def _lookup(request: ToolExecutionRequest) -> str:
     return f"lookup:{request.tool_input['id']}"
 
 
+class _RunObserver:
+    def __init__(self) -> None:
+        self.summaries = []
+
+    def record_run_summary(self, summary) -> None:
+        self.summaries.append(summary)
+
+
 async def test_agent_runner_persists_run_lifecycle_and_kernel_result() -> None:
     persistence = InMemoryRunPersistence()
     event_log = InMemoryEventLog()
+    observer = _RunObserver()
     runner = AgentRunner(
         run_persistence=persistence,
         event_log=event_log,
         llm_client=ScriptedLLMClient([_tool_turn, _final_turn]),
         tool_executor=FunctionToolExecutor({"lookup": _lookup}),
+        run_observer=observer,
         id_generator=DeterministicIdGenerator(),
     )
 
@@ -105,16 +115,25 @@ async def test_agent_runner_persists_run_lifecycle_and_kernel_result() -> None:
     assert result.completed.result_metadata.extra["event_count"] == len(
         result.kernel_result.events
     )
+    assert result.summary.run_id == "run-agent"
+    assert result.summary.stop_reason == "end_turn"
+    assert result.summary.turns_count == 2
+    assert result.summary.tool_calls_count == 1
+    assert result.summary.total_tokens == 10
+    assert result.summary.output_text == "done: lookup:42"
+    assert observer.summaries == [result.summary]
     assert [event.seq for event in result.events] == list(range(1, len(result.events) + 1))
 
 
 async def test_agent_runner_marks_failed_when_kernel_raises() -> None:
     persistence = InMemoryRunPersistence()
     event_log = InMemoryEventLog()
+    observer = _RunObserver()
     runner = AgentRunner(
         run_persistence=persistence,
         event_log=event_log,
         llm_client=ScriptedLLMClient([]),
+        run_observer=observer,
         id_generator=DeterministicIdGenerator(),
     )
 
@@ -136,3 +155,5 @@ async def test_agent_runner_marks_failed_when_kernel_raises() -> None:
     assert failed is not None
     assert failed.status == RunStatus.FAILED
     assert "no scripted LLM turn" in str(failed.error_message)
+    assert observer.summaries[0].status == "failed"
+    assert "no scripted LLM turn" in str(observer.summaries[0].error_message)

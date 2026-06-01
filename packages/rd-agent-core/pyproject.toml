@@ -1,11 +1,11 @@
 [project]
 name = "rd-agent-core"
-version = "0.1.2"
+version = "0.1.3"
 description = "Host-neutral agent runtime kernel and business adapter contracts"
 requires-python = ">=3.12"
 dependencies = [
-    "rd-agent-contracts>=1.14.0,<2.0.0",
-    "rd-llm-adapter>=1.1.1,<2.0.0",
+    "rd-agent-contracts>=1.14.1,<2.0.0",
+    "rd-llm-adapter>=1.1.2,<2.0.0",
 ]
 
 [project.optional-dependencies]

@@ -8,6 +8,7 @@ from typing import Any
 
 from rd_agent_contracts import (
     AgentEvent,
+    CancellationToken,
     EventLogPort,
     IdGenerator,
     Message,
@@ -24,8 +25,10 @@ from rd_agent_contracts import (
 )
 
 from .events import CoreEventWriter
+from .observability import RunObserverLike, notify_run_observer
 from .policies import RunLimits
 from .run import RunKernel, RunKernelResult, RunRequest
+from .summary import RunSummary, summarize_failed_run, summarize_kernel_result
 from .turn import CoreToolPolicy, LLMClientPort, ToolExecutorLike
 
 
@@ -42,6 +45,7 @@ class AgentRunnerRequest:
     system_prompt: str | None = None
     limits: RunLimits | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    cancellation_token: CancellationToken | None = None
 
 
 @dataclass(frozen=True)
@@ -50,6 +54,7 @@ class AgentRunnerResult:
     completed: RunRecord
     kernel_result: RunKernelResult
     events: tuple[AgentEvent, ...]
+    summary: RunSummary
 
 
 class AgentRunner:
@@ -69,6 +74,7 @@ class AgentRunner:
         tool_executor: ToolExecutorLike | None = None,
         tool_observability: ToolObservabilityPort | None = None,
         tool_policy: CoreToolPolicy | None = None,
+        run_observer: RunObserverLike | None = None,
         id_generator: IdGenerator | None = None,
     ) -> None:
         self._run_persistence = run_persistence
@@ -77,6 +83,7 @@ class AgentRunner:
         self._tool_executor = tool_executor
         self._tool_observability = tool_observability
         self._tool_policy = tool_policy
+        self._run_observer = run_observer
         self._id_generator = id_generator
 
     async def run(self, request: AgentRunnerRequest) -> AgentRunnerResult:
@@ -109,8 +116,10 @@ class AgentRunner:
                     system_prompt=request.system_prompt,
                     limits=request.limits or _limits_from_budget(request.budget),
                     metadata=dict(request.metadata),
+                    cancellation_token=request.cancellation_token,
                 )
             )
+            events = tuple(self._event_log.stream_events(run.run_id))
             completed = self._run_persistence.mark_completed(
                 run.run_id,
                 completion=RunCompletion(
@@ -125,17 +134,31 @@ class AgentRunner:
             )
             if completed is None:
                 raise RuntimeError(f"completed run disappeared: {run.run_id}")
+            summary = summarize_kernel_result(
+                run_id=run.run_id,
+                status=str(completed.status),
+                kernel_result=kernel_result,
+                events=events,
+            )
+            await notify_run_observer(self._run_observer, summary)
             return AgentRunnerResult(
                 run=run,
                 completed=completed,
                 kernel_result=kernel_result,
-                events=tuple(self._event_log.stream_events(run.run_id)),
+                events=events,
+                summary=summary,
             )
         except Exception as exc:
             self._run_persistence.mark_failed(
                 run.run_id,
                 failure=RunFailure(error_message=str(exc)),
             )
+            summary = summarize_failed_run(
+                run_id=run.run_id,
+                error_message=str(exc),
+                events=self._event_log.stream_events(run.run_id),
+            )
+            await notify_run_observer(self._run_observer, summary)
             raise
 
     def _resolve_tool_context(

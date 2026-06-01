@@ -15,6 +15,7 @@ from typing import Any, Protocol
 
 from rd_agent_contracts import (
     AgentEvent,
+    CancellationToken,
     InvalidToolCall,
     Message,
     StandardContentBlock,
@@ -41,6 +42,7 @@ from rd_llm_adapter.events import (
     UsageUpdate,
 )
 
+from .errors import CoreErrorType, core_error
 from .events import CoreEventType, CoreEventWriter
 
 
@@ -55,6 +57,7 @@ class TurnRequest:
     tools: Sequence[ToolDefinition] = ()
     turn_index: int = 0
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    cancellation_token: CancellationToken | None = None
 
 
 @dataclass(frozen=True)
@@ -177,23 +180,56 @@ class TurnKernel:
         turn_done: TurnDone | None = None
         last_usage_update: UsageUpdate | None = None
         usage_update_index = 0
+        cancelled = _is_cancelled(request.cancellation_token)
 
-        async for event in self._llm_client.stream_turn(request):
-            if isinstance(event, UsageUpdate):
-                usage_update_index += 1
-                last_usage_update = event
-                emitted = self._emit_standard_event(
-                    writer,
-                    event,
-                    usage_update_index=usage_update_index,
+        if not cancelled:
+            async for event in self._llm_client.stream_turn(request):
+                if isinstance(event, UsageUpdate):
+                    usage_update_index += 1
+                    last_usage_update = event
+                    emitted = self._emit_standard_event(
+                        writer,
+                        event,
+                        usage_update_index=usage_update_index,
+                    )
+                elif isinstance(event, TurnDone):
+                    turn_done = event
+                    emitted = self._emit_standard_event(writer, event)
+                else:
+                    emitted = self._emit_standard_event(writer, event)
+                if emitted is not None:
+                    events.append(emitted)
+                if _is_cancelled(request.cancellation_token):
+                    cancelled = True
+                    break
+
+        if cancelled:
+            usage = _usage_from_update(last_usage_update)
+            events.append(
+                writer.append(
+                    CoreEventType.TURN_COMPLETED,
+                    {
+                        "stop_reason": CoreErrorType.CANCELLED.value,
+                        "raw_stop_reason": CoreErrorType.CANCELLED.value,
+                        "tool_calls_executed": 0,
+                        "invalid_tool_calls": 0,
+                        "pause_requested": False,
+                        "terminal_text": "",
+                        "terminal_reasoning": "",
+                        "usage": asdict(usage),
+                    },
+                    idempotency_key=f"{request.turn_id}:turn_completed",
                 )
-            elif isinstance(event, TurnDone):
-                turn_done = event
-                emitted = self._emit_standard_event(writer, event)
-            else:
-                emitted = self._emit_standard_event(writer, event)
-            if emitted is not None:
-                events.append(emitted)
+            )
+            return TurnKernelResult(
+                stop_reason=CoreErrorType.CANCELLED.value,
+                raw_stop_reason=CoreErrorType.CANCELLED.value,
+                content=(),
+                usage=usage,
+                tool_results=(),
+                invalid_tool_calls=(),
+                events=tuple(events),
+            )
 
         if turn_done is None:
             raise RuntimeError("LLMClientPort.stream_turn completed without TurnDone")
@@ -213,7 +249,14 @@ class TurnKernel:
         tool_results: list[ToolExecutionResult] = []
         pause_requested = False
         for tool_call in (block for block in turn_done.content if isinstance(block, ToolUseBlock)):
-            if pause_requested:
+            if _is_cancelled(request.cancellation_token):
+                cancelled = True
+                result, result_events = self._skip_tool_after_cancellation(
+                    writer,
+                    request,
+                    tool_call,
+                )
+            elif pause_requested:
                 result, result_events = self._skip_tool_after_pause(writer, request, tool_call)
             else:
                 result, result_events = await self._execute_tool(writer, request, tool_call)
@@ -234,7 +277,7 @@ class TurnKernel:
                 )
 
         usage = _usage_from_update(turn_done.usage or last_usage_update)
-        final_stop_reason = (
+        final_stop_reason = CoreErrorType.CANCELLED.value if cancelled else (
             self._tool_policy.pause_stop_reason if pause_requested else turn_done.stop_reason
         )
         events.append(
@@ -282,11 +325,48 @@ class TurnKernel:
             error={
                 "type": "tool_skipped_after_pause",
                 "message": message,
+                "category": "tool_policy",
                 "details": {
                     "tool_name": tool_call.name,
                     "tool_use_id": tool_call.id,
                 },
             },
+        )
+        return result, [
+            writer.append(
+                CoreEventType.TOOL_STARTED,
+                {"tool_name": tool_call.name, "tool_use_id": tool_call.id},
+                idempotency_key=f"{request.turn_id}:tool:{tool_call.id}:started",
+            ),
+            writer.append(
+                CoreEventType.TOOL_FAILED,
+                {
+                    "tool_name": tool_call.name,
+                    "tool_use_id": tool_call.id,
+                    "result": _dataclass_payload(result),
+                },
+                idempotency_key=f"{request.turn_id}:tool:{tool_call.id}:completed",
+            ),
+        ]
+
+    def _skip_tool_after_cancellation(
+        self,
+        writer: CoreEventWriter,
+        request: TurnRequest,
+        tool_call: ToolUseBlock,
+    ) -> tuple[ToolExecutionResult, list[AgentEvent]]:
+        message = "Execution cancelled before this tool call ran."
+        result = ToolExecutionResult(
+            ok=False,
+            content=message,
+            error=core_error(
+                CoreErrorType.CANCELLED.value,
+                message,
+                details={
+                    "tool_name": tool_call.name,
+                    "tool_use_id": tool_call.id,
+                },
+            ),
         )
         return result, [
             writer.append(
@@ -378,6 +458,7 @@ class TurnKernel:
                 error={
                     "type": "tool_not_declared",
                     "message": f"Tool is not declared for this turn: {tool_call.name}",
+                    "category": "tool_unavailable",
                 },
             )
         elif (
@@ -394,6 +475,7 @@ class TurnKernel:
                 error={
                     "type": "tool_executor_missing",
                     "message": "No ToolExecutorPort was provided for tool execution.",
+                    "category": "tool_unavailable",
                 },
             )
         else:
@@ -419,7 +501,11 @@ class TurnKernel:
                 result = ToolExecutionResult(
                     ok=False,
                     content="",
-                    error={"type": exc.__class__.__name__, "message": str(exc)},
+                    error=core_error(
+                        exc.__class__.__name__,
+                        str(exc),
+                        category="tool_error",
+                    ),
                 )
 
         completed_type = CoreEventType.TOOL_COMPLETED if result.ok else CoreEventType.TOOL_FAILED
@@ -489,7 +575,7 @@ def _tool_policy_denial(
     return ToolExecutionResult(
         ok=False,
         content="",
-        error={"type": error_type, "message": message, "details": details},
+        error=core_error(error_type, message, details=details),
     )
 
 
@@ -499,3 +585,7 @@ def _joined_content_text(content: Sequence[StandardContentBlock], block_type: st
         for block in content
         if getattr(block, "type", "") == block_type
     )
+
+
+def _is_cancelled(token: CancellationToken | None) -> bool:
+    return token is not None and token.is_cancelled()

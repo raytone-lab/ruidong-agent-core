@@ -107,6 +107,17 @@ class _ToolExecutor:
         return ToolExecutionResult(ok=True, content=f"result:{request.tool_name}")
 
 
+class _CancellationToken:
+    def __init__(self) -> None:
+        self.cancelled = False
+
+    def is_cancelled(self) -> bool:
+        return self.cancelled
+
+    def request_cancel(self) -> None:
+        self.cancelled = True
+
+
 def _request(**overrides) -> RunRequest:
     values = {
         "run_id": "run-1",
@@ -155,6 +166,37 @@ async def test_run_kernel_stops_after_text_only_turn() -> None:
     assert result.tool_calls_count == 0
     assert result.usage.total() == 5
     assert result.messages[-1].role == "assistant"
+
+
+async def test_run_kernel_stops_without_turn_when_cancelled_before_start() -> None:
+    token = _CancellationToken()
+    token.request_cancel()
+    llm = _LLMClient(
+        [
+            [
+                TurnDone(
+                    stop_reason="end_turn",
+                    content=[TextBlock("not used")],
+                    text_blocks=[TextBlock("not used")],
+                    reasoning_blocks=[],
+                    tool_calls=[],
+                    invalid_tool_calls=[],
+                    raw_stop_reason="end_turn",
+                )
+            ]
+        ]
+    )
+    kernel = RunKernel(
+        llm_client=llm,
+        event_writer=CoreEventWriter(_InMemoryEventLog(), run_id="run-1"),
+        id_generator=_Ids(),
+    )
+
+    result = await kernel.run(_request(cancellation_token=token))
+
+    assert result.stop_reason == "cancelled"
+    assert result.turns_count == 0
+    assert llm.requests == []
 
 
 async def test_run_kernel_continues_after_tool_result_message() -> None:

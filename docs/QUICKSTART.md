@@ -15,9 +15,9 @@ uv sync --all-extras
 作为外部项目依赖时，使用同一批 release wheel：
 
 ```bash
-uv add rd-agent-contracts==1.14.0
-uv add rd-llm-adapter==1.1.1
-uv add rd-agent-core==0.1.2
+uv add rd-agent-contracts==1.14.1
+uv add rd-llm-adapter==1.1.2
+uv add rd-agent-core==0.1.3
 ```
 
 如果包还没有发布到私有索引，可以从 GitHub Releases 下载对应 wheel 后本地安装。
@@ -82,9 +82,10 @@ assert result.events
 3. 实现 `ToolExecutorPort`，先接只读工具，再接写工具和 pause tool。
 4. 用 `RunKernel` 跑 text-only、single-tool、multi-turn、invalid-tool、max-tool-calls 五条 smoke。
 5. 接 `RunPersistencePort`，把 stop reason、usage、turn/tool count 和 engine state 落库。
-6. 再接 continuation queue、UI projection、billing、artifact pipeline 和生产级 observability。
+6. 跑 `rd_agent_core.conformance`，把 `EventLogPort`、`RunPersistencePort`、`ToolExecutorPort` 的最低语义纳入宿主 CI。
+7. 再接 continuation queue、UI projection、billing、artifact pipeline 和生产级 observability。
 
-生产接入可以从 `AgentRunner` 开始。它会按顺序调用 `RunPersistencePort.create_root_run()`、`mark_running()`、`RunKernel.run()`、`mark_completed()` / `mark_failed()`，减少重复 lifecycle glue。需要更强事务边界时，仍可直接使用 `RunKernel`。
+生产接入可以从 `AgentRunner` 开始。它会按顺序调用 `RunPersistencePort.create_root_run()`、`mark_running()`、`RunKernel.run()`、`mark_completed()` / `mark_failed()`，并返回 `RunSummary` 供 metrics、trace、billing projection 使用。需要更强事务边界时，仍可直接使用 `RunKernel`。
 
 ## 发布前验证
 
@@ -98,6 +99,6 @@ uv build --wheel packages/rd-agent-core
 
 推荐 release tag：
 
-- `rd-agent-contracts-v1.14.0`
-- `rd-llm-adapter-v1.1.1`
-- `rd-agent-core-v0.1.2`
+- `rd-agent-contracts-v1.14.1`
+- `rd-llm-adapter-v1.1.2`
+- `rd-agent-core-v0.1.3`

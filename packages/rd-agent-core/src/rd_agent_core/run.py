@@ -10,6 +10,7 @@ from typing import Any
 
 from rd_agent_contracts import (
     AgentEvent,
+    CancellationToken,
     IdGenerator,
     Message,
     StandardContentBlock,
@@ -26,6 +27,7 @@ from rd_agent_contracts import (
     UuidIdGenerator,
 )
 
+from .errors import CoreErrorType, core_error
 from .events import CoreEventWriter
 from .policies import (
     RunLimits,
@@ -62,6 +64,7 @@ class RunRequest:
     limits: RunLimits = field(default_factory=RunLimits)
     metadata: dict[str, Any] = field(default_factory=dict)
     turn_offset: int = 0
+    cancellation_token: CancellationToken | None = None
 
     def __post_init__(self) -> None:
         if self.turn_offset < 0:
@@ -122,6 +125,10 @@ class RunKernel:
         tool_signatures: list[ToolCallSignature] = []
 
         while True:
+            if _is_cancelled(request.cancellation_token):
+                stop_reason = CoreErrorType.CANCELLED.value
+                break
+
             state = RunLimitState(
                 turns_used=len(turn_results),
                 tool_calls_used=tool_calls_count,
@@ -157,6 +164,7 @@ class RunKernel:
                     tools=request.tools,
                     turn_index=turn_index,
                     metadata=request.metadata,
+                    cancellation_token=request.cancellation_token,
                 )
             )
 
@@ -178,6 +186,8 @@ class RunKernel:
 
             if _has_repeated_tool_call_denial(turn_result.tool_results):
                 stop_reason = "repeated_tool_call"
+                break
+            if turn_result.stop_reason == CoreErrorType.CANCELLED.value:
                 break
             if turn_result.pause_requested or turn_result.tool_calls_executed == 0:
                 break
@@ -239,14 +249,14 @@ class _MaxToolCallsGuard:
             return ToolExecutionResult(
                 ok=False,
                 content="Tool call blocked by run policy: max_tool_calls reached.",
-                error={
-                    "type": "max_tool_calls",
-                    "message": "Tool call blocked by run policy: max_tool_calls reached.",
-                    "details": {
+                error=core_error(
+                    CoreErrorType.MAX_TOOL_CALLS.value,
+                    "Tool call blocked by run policy: max_tool_calls reached.",
+                    details={
                         "tool_name": request.tool_name,
                         "tool_use_id": request.tool_use_id,
                     },
-                },
+                ),
             )
 
         self._tool_calls_seen += 1
@@ -277,14 +287,14 @@ class _RepeatedToolCallGuard:
             return ToolExecutionResult(
                 ok=False,
                 content="Repeated tool call blocked by run policy.",
-                error={
-                    "type": "repeated_tool_call",
-                    "message": "Repeated tool call blocked by run policy.",
-                    "details": {
+                error=core_error(
+                    CoreErrorType.REPEATED_TOOL_CALL.value,
+                    "Repeated tool call blocked by run policy.",
+                    details={
                         "tool_name": request.tool_name,
                         "tool_use_id": request.tool_use_id,
                     },
-                },
+                ),
             )
 
         self._signatures.append(candidate)
@@ -359,3 +369,7 @@ def _add_usage(left: Usage, right: Usage) -> Usage:
         ),
         cache_read_input_tokens=left.cache_read_input_tokens + right.cache_read_input_tokens,
     )
+
+
+def _is_cancelled(token: CancellationToken | None) -> bool:
+    return token is not None and token.is_cancelled()

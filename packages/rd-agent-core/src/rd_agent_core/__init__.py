@@ -13,11 +13,23 @@ from .business import (
     VerificationPlan,
     VerificationPolicyPort,
 )
+from .conformance import (
+    assert_event_log_port_conformance,
+    assert_run_persistence_port_conformance,
+    assert_tool_executor_port_conformance,
+)
+from .errors import CoreErrorCategory, CoreErrorType, classify_core_error, core_error
 from .events import CoreEventType, CoreEventWriter
 from .llm_clients import (
     AnthropicNativeLLMClient,
     OpenAICompatLLMClient,
     ProviderClientConfig,
+)
+from .observability import (
+    AsyncRunObserverPort,
+    RunObserverLike,
+    RunObserverPort,
+    notify_run_observer,
 )
 from .policies import (
     RunLimitDecision,
@@ -35,6 +47,7 @@ from .run import (
     build_messages_after_turn,
 )
 from .runner import AgentRunner, AgentRunnerRequest, AgentRunnerResult
+from .summary import RunSummary, summarize_failed_run, summarize_kernel_result
 from .turn import (
     AsyncToolExecutorPort,
     CoreToolPolicy,
@@ -46,7 +59,7 @@ from .turn import (
     TurnRequest,
 )
 
-__version__ = "0.1.2"
+__version__ = "0.1.3"
 
 __all__ = [
     "ArtifactDescriptor",
@@ -56,6 +69,7 @@ __all__ = [
     "AgentRunnerRequest",
     "AgentRunnerResult",
     "AnthropicNativeLLMClient",
+    "AsyncRunObserverPort",
     "BusinessAgentAdapter",
     "BusinessAgentProfile",
     "BusinessTask",
@@ -64,6 +78,8 @@ __all__ = [
     "AsyncToolExecutorPort",
     "CoreEventType",
     "CoreEventWriter",
+    "CoreErrorCategory",
+    "CoreErrorType",
     "CoreToolPolicy",
     "LLMClientPort",
     "OpenAICompatLLMClient",
@@ -74,7 +90,10 @@ __all__ = [
     "RunKernelResult",
     "RunLimitState",
     "RunLimits",
+    "RunObserverLike",
+    "RunObserverPort",
     "RunRequest",
+    "RunSummary",
     "ToolCallSignature",
     "ToolExecutorLike",
     "ToolSafetyPolicy",
@@ -83,8 +102,16 @@ __all__ = [
     "TurnRequest",
     "VerificationPlan",
     "VerificationPolicyPort",
+    "assert_event_log_port_conformance",
+    "assert_run_persistence_port_conformance",
+    "assert_tool_executor_port_conformance",
     "build_messages_after_turn",
+    "classify_core_error",
+    "core_error",
     "evaluate_run_limits",
     "has_repeated_tool_call",
+    "notify_run_observer",
+    "summarize_failed_run",
+    "summarize_kernel_result",
     "tool_call_signature",
 ]

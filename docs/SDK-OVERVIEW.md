@@ -10,7 +10,7 @@
 
 - `rd-agent-contracts` 定义跨包协议、数据结构和 host ports；
 - `rd-llm-adapter` 把不同 provider 的流式 chunk 归一成标准事件；
-- `rd-agent-core` 执行 turn/run kernel、AgentRunner lifecycle facade、provider LLM client glue、工具调用、事件写入和运行策略；
+- `rd-agent-core` 执行 turn/run kernel、AgentRunner lifecycle facade、provider LLM client glue、工具调用、事件写入、取消、运行摘要/观测和运行策略；
 - `rd_agent_core.testing` 提供接入方可复用的本地 harness。
 
 ## 架构分层
@@ -77,6 +77,7 @@ flowchart TD
 - repeated tool call 保护
 - tool allowlist/blocklist 和 mutating tool confirmation
 - pause tool 停止
+- 协作式 cancellation token
 
 ### 4. 事件日志与可回放性
 
@@ -143,6 +144,8 @@ PPT、文档、数据分析、代码执行等业务能力应该实现这些 adap
 
 接入方可以用 harness 在没有真实数据库、真实 provider 的情况下验证自己的工具、消息和 run 行为。
 
+`rd_agent_core.conformance` 进一步提供可执行的 port conformance 检查，验证 `EventLogPort`、`RunPersistencePort`、`ToolExecutorPort` 的最低语义，适合放入宿主项目 CI。
+
 ## SDK 不负责什么
 
 这些是 host 的职责，不应该进入 core：
@@ -194,7 +197,7 @@ assert result.events
 
 ### 方式 B：使用 AgentRunner facade
 
-生产 host 可以使用 `AgentRunner` 接管标准 run lifecycle glue：创建 run、标记 running、调用 `RunKernel`、标记 completed/failed。
+生产 host 可以使用 `AgentRunner` 接管标准 run lifecycle glue：创建 run、标记 running、调用 `RunKernel`、标记 completed/failed，并输出 `RunSummary` 给 metrics/trace/billing 投影。
 
 `AgentRunner` 不拥有数据库事务；如果 host 需要把 run 状态、队列和会话状态做原子提交，应在 port 实现中处理事务，或直接使用 `RunKernel`。
 
@@ -291,14 +294,15 @@ else:
 4. 实现 `ToolExecutorPort`，只接只读工具。
 5. 接 `RunKernel`，跑 text-only、single-tool、multi-turn、invalid-tool、max-tool-calls 五条 smoke。
 6. 接 `RunPersistencePort`，落库 stop reason、usage、turn/tool count、engine state。
-7. 再接 continuation queue、subagent、UI projection、billing、artifact。
+7. 跑 `rd_agent_core.conformance`，把 port 语义纳入宿主 CI。
+8. 再接 continuation queue、subagent、UI projection、billing、artifact。
 
 ## 当前发布形态
 
 当前可以作为受控早期版本给接入方使用：
 
-- `rd-agent-contracts==1.14.0`
-- `rd-llm-adapter==1.1.1`
-- `rd-agent-core==0.1.2`
+- `rd-agent-contracts==1.14.1`
+- `rd-llm-adapter==1.1.2`
+- `rd-agent-core==0.1.3`
 
 `rd-agent-core` 仍是 `0.x`，表示 runtime API 已经有清晰边界和测试保护，但在公开 1.0 前仍可能根据 host 接入反馈做小幅调整。

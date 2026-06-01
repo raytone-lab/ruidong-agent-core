@@ -1,5 +1,7 @@
 # Model Adapter 归一化层设计方案
 
+> 历史设计记录：本文保留 model adapter 从 SaaS 抽离到 SDK 的演进细节。新的 host 接入应优先阅读 `docs/SDK-OVERVIEW.md`、`docs/API-REFERENCE.md` 和 `docs/QUICKSTART.md`；运行时主边界是 `rd-llm-adapter` + `rd-agent-core`，不是旧的 `rd-llm-gateway`。
+
 **版本**：v42（fixture validator skipped gate）
 **日期**：2026-04-30
 **状态**：Phase 1A/1B 已实施；Phase 2A/2B/2C replay + 采样 + fixture 回归入口已实施；Anthropic native request/parser/transport PoC 已实施；adapter/transport registry 已落地；native runtime feature flag 和 adapter allowlist 已落地且默认关闭；native runtime 错误边界已补齐；Anthropic native usage 标准事件已补齐；recorded fixture active adapter 标记已修正；fixture validation CLI / runbook / versioned JSON report / adapter + model 覆盖统计与 gate / recorded + Anthropic scenario gate 已落地；recorded request 脱敏 gate 已落地；private recorded fixtures 已加入 `.gitignore`；validator 会拒绝空验证并支持 skipped gate；recorder 支持按模型 glob 定向采样；`.env.example` 已补默认关闭的 model adapter 配置；redacted thinking fixture 已补齐，待真实 SSE 样本补充

@@ -6,11 +6,26 @@
 
 | Package | 当前版本 | 用途 |
 | --- | --- | --- |
-| `rd-agent-contracts` | `1.14.0` | 数据结构、运行合同、host ports |
-| `rd-llm-adapter` | `1.1.1` | Provider 请求构造、流式 chunk 解析、标准事件 |
-| `rd-agent-core` | `0.1.2` | Turn/Run kernel、AgentRunner、provider LLM client、事件写入、运行策略、业务 adapter 边界、testing harness |
+| `rd-agent-contracts` | `1.14.1` | 数据结构、运行合同、host ports、`py.typed` |
+| `rd-llm-adapter` | `1.1.2` | Provider 请求构造、流式 chunk 解析、标准事件、`py.typed` |
+| `rd-agent-core` | `0.1.3` | Turn/Run kernel、AgentRunner、provider LLM client、事件写入、运行策略、取消、运行摘要/观测、conformance、业务 adapter 边界、testing harness |
 
 ## rd-agent-core
+
+公开主路径索引：
+
+- `AgentRunner`
+- `AgentRunnerRequest`
+- `AgentRunnerResult`
+- `RunKernel`
+- `RunRequest`
+- `RunSummary`
+- `RunObserverPort`
+- `TurnKernel`
+- `TurnRequest`
+- `ToolSafetyPolicy`
+- `CoreErrorCategory`
+- `CoreErrorType`
 
 ### `AgentRunner`
 
@@ -25,6 +40,7 @@ AgentRunner(
     tool_executor: ToolExecutorLike | None = None,
     tool_observability: ToolObservabilityPort | None = None,
     tool_policy: CoreToolPolicy | None = None,
+    run_observer: RunObserverLike | None = None,
     id_generator: IdGenerator | None = None,
 )
 ```
@@ -36,6 +52,8 @@ result = await runner.run(AgentRunnerRequest(...))
 ```
 
 `AgentRunner` 仍然不拥有数据库事务。需要强事务边界的 host 应在 port 实现中处理，或继续直接使用 `RunKernel`。
+
+`AgentRunnerResult` 包含 `run`、`completed`、`kernel_result`、`events` 和 `summary`。
 
 ### `RunKernel`
 
@@ -82,6 +100,7 @@ RunRequest(
     limits: RunLimits = RunLimits(),
     metadata: dict[str, Any] = {},
     turn_offset: int = 0,
+    cancellation_token: CancellationToken | None = None,
 )
 ```
 
@@ -98,6 +117,7 @@ RunRequest(
 | `limits` | turn/tool/time/repeated-call 限制 |
 | `metadata` | 透传到 turn started 事件的元数据 |
 | `turn_offset` | continuation 场景下已提交 turn 数，确保 turn index 单调 |
+| `cancellation_token` | 协作式取消令牌；取消后 stop reason 为 `cancelled`，不会继续发起新 turn 或执行后续工具 |
 
 ### `RunKernelResult`
 
@@ -155,6 +175,7 @@ TurnRequest(
     tools: Sequence[ToolDefinition] = (),
     turn_index: int = 0,
     metadata: Mapping[str, Any] = {},
+    cancellation_token: CancellationToken | None = None,
 )
 ```
 
@@ -188,6 +209,55 @@ class LLMClientPort(Protocol):
 - 正常路径必须最终 yield 一个 `TurnDone`；
 - 异常路径建议调用 provider parser session 的 `finalize_on_error()`，尽量保留 partial text/reasoning/tool args；
 - 不要把 provider 私有 chunk 直接交给 core。
+
+### `RunSummary`
+
+运行级摘要，适合 host 写 metrics、trace、billing projection 或审计索引。
+
+```python
+RunSummary(
+    run_id: str,
+    status: str,
+    stop_reason: str | None,
+    usage: Usage = Usage(),
+    turns_count: int = 0,
+    tool_calls_count: int = 0,
+    invalid_tool_calls_count: int = 0,
+    event_count: int = 0,
+    output_text: str = "",
+    error_message: str | None = None,
+    metadata: Mapping[str, Any] = {},
+)
+```
+
+`AgentRunnerResult.summary` 会返回该对象；直接使用 `RunKernel` 的 host 可调用 `summarize_kernel_result()` 或 `summarize_failed_run()`。
+
+### `RunObserverPort`
+
+`AgentRunner` 的运行级观测 hook。同步和异步 observer 都支持：
+
+```python
+class RunObserverPort(Protocol):
+    def record_run_summary(self, summary: RunSummary) -> None: ...
+
+class AsyncRunObserverPort(Protocol):
+    async def record_run_summary(self, summary: RunSummary) -> None: ...
+```
+
+observer 失败不会改变 run 的 completed/failed 状态；生产 host 应在 observer 内部处理自己的重试和告警。
+
+### Error classification
+
+Core 内置稳定错误分类：`CoreErrorCategory`、`CoreErrorType`、`classify_core_error()`、`core_error()`。
+
+```python
+CoreErrorCategory
+CoreErrorType
+classify_core_error(error_type)
+core_error(error_type, message, category=None, details=None)
+```
+
+工具失败结果中的 `error.type` 保留具体原因，`error.category` 用于跨 provider / tool / policy 的统一聚合。当前分类包括 `tool_policy`、`tool_unavailable`、`tool_error`、`run_limit`、`cancelled`、`provider`、`invalid_tool_call`、`internal`。
 
 ### `ToolExecutorLike`
 
@@ -299,8 +369,15 @@ ProviderClientConfig(
     profile: Any | None = None,
 )
 
-OpenAICompatLLMClient(config, supports_function_calling=True, supports_stream_usage=True)
-AnthropicNativeLLMClient(config, thinking_budget_tokens=None)
+OpenAICompatLLMClient(
+    config,
+    adapter=None,
+    transport=None,
+    supports_function_calling=True,
+    supports_stream_usage=True,
+    reasoning_effort=None,
+)
+AnthropicNativeLLMClient(config, adapter=None, transport=None, thinking_budget_tokens=None)
 ```
 
 这些 client 负责：
@@ -403,6 +480,26 @@ HarnessRunResult(
 - `InMemoryEventLog`：带 idempotency 的 per-run 事件日志；
 - `InMemoryRunPersistence`：内存版 `RunPersistencePort`；
 - `DeterministicIdGenerator`：生成稳定 run/turn/message/tool id。
+
+## rd_agent_core.conformance
+
+Conformance suite 面向外部 host，用来验证自己实现的 port 是否满足 SDK 最低语义。公开入口是 `assert_event_log_port_conformance()`、`assert_run_persistence_port_conformance()`、`assert_tool_executor_port_conformance()`。
+
+- `assert_event_log_port_conformance`
+- `assert_run_persistence_port_conformance`
+- `assert_tool_executor_port_conformance`
+
+```python
+assert_event_log_port_conformance(event_log)
+assert_run_persistence_port_conformance(persistence)
+await assert_tool_executor_port_conformance(executor, request=...)
+```
+
+覆盖点：
+
+- `EventLogPort` 的 idempotency、per-run seq、`from_seq` exclusive 语义；
+- `RunPersistencePort` 的 root/running/completed/continuation parent/max_continuations 语义；
+- `ToolExecutorPort` 的返回类型和 error shape。
 
 ## rd-agent-contracts
 
@@ -745,6 +842,8 @@ resolve_transport_for_profile(profile: Any) -> Any
 
 - `SQLiteEventLog`：实现 `EventLogPort`；
 - `SQLiteRunPersistence`：实现 `RunPersistencePort`；
+- `SQLiteContinuationQueue`：实现 `ContinuationQueuePort`；
+- `ReferenceContinuationWorker`：展示 continuation worker 生命周期骨架；
 - `connect_sqlite_reference_host()`：创建共享 SQLite connection；
 - `python -m examples.reference_host.demo`：运行一条 deterministic single-tool demo。
 

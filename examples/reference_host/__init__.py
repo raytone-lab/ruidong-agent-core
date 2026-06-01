@@ -1,6 +1,7 @@
 """SQLite-backed reference host example for rd-agent-core."""
 
 from .sqlite_reference_host import (
+    SQLiteContinuationQueue,
     SQLiteEventLog,
     SQLiteReferenceHost,
     SQLiteRunPersistence,
@@ -8,6 +9,7 @@ from .sqlite_reference_host import (
 )
 
 __all__ = [
+    "SQLiteContinuationQueue",
     "SQLiteEventLog",
     "SQLiteReferenceHost",
     "SQLiteRunPersistence",

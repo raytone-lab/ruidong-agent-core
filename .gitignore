@@ -17,6 +17,7 @@ uv.lock
 
 # Local tool caches
 .npm-cache/
+.audit*-workflow.js
 
 # IDE
 .vscode/

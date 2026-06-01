@@ -25,9 +25,9 @@ def test_discover_workspace_packages_includes_runtime_packages() -> None:
 
     packages = module.discover_workspace_packages(REPO_ROOT)
 
-    assert packages["rd-agent-contracts"].version == "1.14.0"
-    assert packages["rd-llm-adapter"].version == "1.1.1"
-    assert packages["rd-agent-core"].version == "0.1.2"
+    assert packages["rd-agent-contracts"].version == "1.14.1"
+    assert packages["rd-llm-adapter"].version == "1.1.2"
+    assert packages["rd-agent-core"].version == "0.1.3"
     assert packages["rd-tools"].package_dir == REPO_ROOT / "tools"
 
 
@@ -47,7 +47,7 @@ def test_resolve_local_install_order_for_agent_core() -> None:
 def test_parse_requirement_name_handles_version_specifiers_and_extras() -> None:
     module = _load_module()
 
-    assert module.parse_requirement_name("rd-agent-contracts>=1.14.0,<2") == (
+    assert module.parse_requirement_name("rd-agent-contracts>=1.14.1,<2") == (
         "rd-agent-contracts"
     )
     assert module.parse_requirement_name("openai[realtime]>=2.0") == "openai"
@@ -60,11 +60,11 @@ def test_find_wheel_uses_distribution_name_and_version(tmp_path: Path) -> None:
     module = _load_module()
     package = module.WorkspacePackage(
         name="rd-agent-core",
-        version="0.1.2",
+        version="0.1.3",
         package_dir=REPO_ROOT / "packages" / "rd-agent-core",
         dependencies=(),
     )
-    wheel = tmp_path / "rd_agent_core-0.1.2-py3-none-any.whl"
+    wheel = tmp_path / "rd_agent_core-0.1.3-py3-none-any.whl"
     wheel.write_text("", encoding="utf-8")
 
     assert module.find_wheel(package, dist_dir=tmp_path) == wheel
@@ -74,7 +74,7 @@ def test_find_wheel_rejects_missing_wheel(tmp_path: Path) -> None:
     module = _load_module()
     package = module.WorkspacePackage(
         name="rd-agent-core",
-        version="0.1.2",
+        version="0.1.3",
         package_dir=REPO_ROOT / "packages" / "rd-agent-core",
         dependencies=(),
     )

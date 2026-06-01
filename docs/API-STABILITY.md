@@ -6,9 +6,9 @@
 
 当前版本：
 
-- `rd-agent-contracts==1.14.0`
-- `rd-llm-adapter==1.1.1`
-- `rd-agent-core==0.1.2`
+- `rd-agent-contracts==1.14.1`
+- `rd-llm-adapter==1.1.2`
+- `rd-agent-core==0.1.3`
 
 `rd-agent-contracts` 和 `rd-llm-adapter` 已经按 SemVer 风格维护。`rd-agent-core` 仍是 `0.x`，表示核心方向稳定，但运行 API 会根据真实 host 接入反馈继续收紧。
 
@@ -26,6 +26,7 @@
 - `rd_llm_adapter.events` 的标准事件集合；
 - `StreamParserSession.feed/finalize/finalize_on_error` 语义；
 - `rd_agent_core.testing` 的 harness 主路径。
+- `rd_agent_core.conformance` 的 port conformance 检查入口。
 
 ### Provisional Runtime API
 
@@ -37,6 +38,8 @@
 - `AgentRunner`
 - `AgentRunnerRequest`
 - `AgentRunnerResult`
+- `RunSummary`
+- `RunObserverPort`
 - `OpenAICompatLLMClient`
 - `AnthropicNativeLLMClient`
 - `ProviderClientConfig`

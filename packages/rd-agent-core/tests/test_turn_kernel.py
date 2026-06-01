@@ -95,6 +95,17 @@ class _Observability:
         self.records.extend(records)
 
 
+class _CancellationToken:
+    def __init__(self) -> None:
+        self.cancelled = False
+
+    def is_cancelled(self) -> bool:
+        return self.cancelled
+
+    def request_cancel(self) -> None:
+        self.cancelled = True
+
+
 def _request() -> TurnRequest:
     return TurnRequest(
         run_id="run-1",
@@ -103,6 +114,18 @@ def _request() -> TurnRequest:
         tool_context=ToolExecutionContext(project_id="project-1", session_id="session-1"),
         model="test-model",
         turn_index=2,
+    )
+
+
+def _request_with_cancelled_token() -> TurnRequest:
+    token = _CancellationToken()
+    token.request_cancel()
+    return TurnRequest(
+        run_id="run-1",
+        turn_id="turn-1",
+        messages=[],
+        tool_context=ToolExecutionContext(project_id="project-1"),
+        cancellation_token=token,
     )
 
 
@@ -178,6 +201,121 @@ async def test_turn_kernel_streams_events_and_executes_completed_tool_call() -> 
     assert usage_event.payload["usage_sequence"] == 1
     assert usage_event.payload["cache_read_input_tokens"] == 3
     assert usage_event.payload["cache_creation_input_tokens"] == 5
+
+
+async def test_turn_kernel_returns_cancelled_without_streaming_when_token_is_cancelled() -> None:
+    llm = _LLMClient(
+        [
+            TurnDone(
+                stop_reason="end_turn",
+                content=[TextBlock("should not stream")],
+                text_blocks=[TextBlock("should not stream")],
+                reasoning_blocks=[],
+                tool_calls=[],
+                invalid_tool_calls=[],
+                raw_stop_reason="stop",
+            )
+        ]
+    )
+    kernel = TurnKernel(
+        llm_client=llm,
+        event_writer=CoreEventWriter(_InMemoryEventLog(), run_id="run-1"),
+    )
+
+    result = await kernel.run_turn(_request_with_cancelled_token())
+
+    assert result.stop_reason == "cancelled"
+    assert result.content == ()
+    assert llm.requests == []
+    assert [event.event_type for event in result.events] == [
+        CoreEventType.TURN_STARTED,
+        CoreEventType.TURN_COMPLETED,
+    ]
+
+
+async def test_turn_kernel_cancels_after_partial_stream_and_skips_tools() -> None:
+    token = _CancellationToken()
+    tool_call = ToolUseBlock(id="tool-1", name="read_file", input={"path": "README.md"})
+
+    async def events(_request: TurnRequest) -> AsyncIterable[StandardEvent]:
+        yield TextDelta("partial")
+        token.request_cancel()
+        yield TurnDone(
+            stop_reason="tool_use",
+            content=[tool_call],
+            text_blocks=[],
+            reasoning_blocks=[],
+            tool_calls=[tool_call],
+            invalid_tool_calls=[],
+            raw_stop_reason="tool_use",
+        )
+
+    class _CancellingLLMClient:
+        async def stream_turn(self, request: TurnRequest) -> AsyncIterable[StandardEvent]:
+            async for event in events(request):
+                yield event
+
+    executor = _ToolExecutor()
+    kernel = TurnKernel(
+        llm_client=_CancellingLLMClient(),
+        event_writer=CoreEventWriter(_InMemoryEventLog(), run_id="run-1"),
+        tool_executor=executor,
+    )
+    request = _request()
+    request = TurnRequest(
+        run_id=request.run_id,
+        turn_id=request.turn_id,
+        messages=request.messages,
+        tool_context=request.tool_context,
+        cancellation_token=token,
+    )
+
+    result = await kernel.run_turn(request)
+
+    assert result.stop_reason == "cancelled"
+    assert executor.requests == []
+    assert CoreEventType.TEXT_DELTA in [event.event_type for event in result.events]
+
+
+async def test_turn_kernel_marks_unexecuted_tools_cancelled_after_turn_done() -> None:
+    token = _CancellationToken()
+    tool_call = ToolUseBlock(id="tool-1", name="read_file", input={"path": "README.md"})
+
+    class _CancellingAfterDoneLLMClient:
+        async def stream_turn(self, request: TurnRequest) -> AsyncIterable[StandardEvent]:
+            yield TurnDone(
+                stop_reason="tool_use",
+                content=[tool_call],
+                text_blocks=[],
+                reasoning_blocks=[],
+                tool_calls=[tool_call],
+                invalid_tool_calls=[],
+                raw_stop_reason="tool_use",
+            )
+            token.request_cancel()
+
+    executor = _ToolExecutor()
+    kernel = TurnKernel(
+        llm_client=_CancellingAfterDoneLLMClient(),
+        event_writer=CoreEventWriter(_InMemoryEventLog(), run_id="run-1"),
+        tool_executor=executor,
+    )
+
+    result = await kernel.run_turn(
+        TurnRequest(
+            run_id="run-1",
+            turn_id="turn-1",
+            messages=[],
+            tool_context=ToolExecutionContext(project_id="project-1"),
+            cancellation_token=token,
+        )
+    )
+
+    assert result.stop_reason == "cancelled"
+    assert executor.requests == []
+    assert len(result.content) == len(result.tool_results) == 1
+    assert result.tool_results[0].error is not None
+    assert result.tool_results[0].error["type"] == "cancelled"
 
 
 async def test_turn_kernel_dedupes_usage_update_on_turn_retry() -> None:
@@ -373,6 +511,7 @@ async def test_turn_kernel_fails_closed_when_executor_is_missing() -> None:
     assert result.tool_results[0].error == {
         "type": "tool_executor_missing",
         "message": "No ToolExecutorPort was provided for tool execution.",
+        "category": "tool_unavailable",
     }
     assert CoreEventType.TOOL_FAILED in [event.event_type for event in result.events]
 
@@ -419,6 +558,7 @@ async def test_turn_kernel_fails_closed_for_undeclared_tool_call() -> None:
     assert result.tool_results[0].error == {
         "type": "tool_not_declared",
         "message": "Tool is not declared for this turn: delete_project",
+        "category": "tool_unavailable",
     }
 
 
