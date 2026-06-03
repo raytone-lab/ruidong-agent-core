@@ -440,6 +440,130 @@ async def test_run_kernel_blocks_repeated_tool_call_before_execution() -> None:
     assert result.tool_results[-1].error["type"] == "repeated_tool_call"
 
 
+async def test_run_kernel_allows_repeated_tool_when_metadata_disables_guard() -> None:
+    first_tool_call = ToolUseBlock(
+        id="tool-1",
+        name="browser_snapshot",
+        input={},
+    )
+    repeated_tool_call = ToolUseBlock(
+        id="tool-2",
+        name="browser_snapshot",
+        input={},
+    )
+    llm = _LLMClient(
+        [
+            [
+                TurnDone(
+                    stop_reason="tool_use",
+                    content=[first_tool_call],
+                    text_blocks=[],
+                    reasoning_blocks=[],
+                    tool_calls=[first_tool_call],
+                    invalid_tool_calls=[],
+                    raw_stop_reason="tool_use",
+                )
+            ],
+            [
+                TurnDone(
+                    stop_reason="tool_use",
+                    content=[repeated_tool_call],
+                    text_blocks=[],
+                    reasoning_blocks=[],
+                    tool_calls=[repeated_tool_call],
+                    invalid_tool_calls=[],
+                    raw_stop_reason="tool_use",
+                )
+            ],
+            [
+                TurnDone(
+                    stop_reason="end_turn",
+                    content=[TextBlock("done")],
+                    text_blocks=[TextBlock("done")],
+                    reasoning_blocks=[],
+                    tool_calls=[],
+                    invalid_tool_calls=[],
+                    raw_stop_reason="end_turn",
+                )
+            ],
+        ]
+    )
+    executor = _ToolExecutor()
+    kernel = RunKernel(
+        llm_client=llm,
+        event_writer=CoreEventWriter(_InMemoryEventLog(), run_id="run-1"),
+        tool_executor=executor,
+        id_generator=_Ids(),
+    )
+
+    result = await kernel.run(
+        _request(
+            limits=RunLimits(repeated_tool_call_threshold=2),
+            tools=(
+                ToolDefinition(
+                    name="browser_snapshot",
+                    description="Snapshot browser",
+                    input_schema={"type": "object"},
+                    metadata={"repeat_policy": {"mode": "allow"}},
+                ),
+            ),
+        )
+    )
+
+    assert result.stop_reason == "end_turn"
+    assert result.turns_count == 3
+    assert len(executor.requests) == 2
+
+
+async def test_run_kernel_uses_tool_metadata_repeat_threshold_override() -> None:
+    tool_calls = [
+        ToolUseBlock(id=f"tool-{index}", name="browser_click", input={"text": "Start"})
+        for index in range(1, 4)
+    ]
+    llm = _LLMClient(
+        [
+            [
+                TurnDone(
+                    stop_reason="tool_use",
+                    content=[tool_call],
+                    text_blocks=[],
+                    reasoning_blocks=[],
+                    tool_calls=[tool_call],
+                    invalid_tool_calls=[],
+                    raw_stop_reason="tool_use",
+                )
+            ]
+            for tool_call in tool_calls
+        ]
+    )
+    executor = _ToolExecutor()
+    kernel = RunKernel(
+        llm_client=llm,
+        event_writer=CoreEventWriter(_InMemoryEventLog(), run_id="run-1"),
+        tool_executor=executor,
+        id_generator=_Ids(),
+    )
+
+    result = await kernel.run(
+        _request(
+            limits=RunLimits(repeated_tool_call_threshold=2),
+            tools=(
+                ToolDefinition(
+                    name="browser_click",
+                    description="Click browser element",
+                    input_schema={"type": "object"},
+                    metadata={"repeat_policy": {"threshold": 3}},
+                ),
+            ),
+        )
+    )
+
+    assert result.stop_reason == "repeated_tool_call"
+    assert len(executor.requests) == 2
+    assert result.tool_results[-1].error is not None
+    assert result.tool_results[-1].error["details"]["threshold"] == 3
+
+
 async def test_run_kernel_applies_turn_offset_to_continuation_turn_index() -> None:
     llm = _LLMClient(
         [

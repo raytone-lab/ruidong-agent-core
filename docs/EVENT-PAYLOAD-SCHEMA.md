@@ -22,7 +22,7 @@ AgentEvent(
 
 | Event Type | Payload Fields | Notes |
 | --- | --- | --- |
-| `turn_started` | `model: str \| None`, `turn_index: int`, `metadata: dict` | 每个 turn 开始时写入。 |
+| `turn_started` | `model: str \| None`, `model_profile: dict \| None`, `turn_index: int`, `metadata: dict` | 每个 turn 开始时写入。`model_profile` 是脱敏后的协议/能力摘要。 |
 | `text_delta` | `text: str`, `block_index: int` | 模型普通文本增量。 |
 | `reasoning_delta` | `text: str`, `block_index: int`, `provider_data: dict \| None` | 模型 reasoning/thinking 增量。 |
 | `tool_call_started` | `index: int`, `call_id: str \| None`, `name: str \| None`, `encoding_hint: str \| None` | 工具调用 lifecycle 开始。 |
@@ -69,4 +69,3 @@ ToolExecutionResult(
 - host 应容忍未知字段；
 - `tool_failed.result.error.type` 应被视为机器可读错误分类；
 - replay 和 billing 应以原始 `AgentEvent` 为准，而不是 UI 派生对象。
-

@@ -16,6 +16,7 @@ from rd_llm_adapter import (
 from rd_llm_adapter.base import StreamParserSession, Transport
 from rd_llm_adapter.events import StandardEvent
 
+from .model_profile import ModelProfile, normalize_model_profile
 from .turn import TurnRequest
 
 
@@ -27,7 +28,19 @@ class ProviderClientConfig:
     timeout: float = 60.0
     max_tokens: int = 4096
     extra_headers: Mapping[str, str] | None = None
-    profile: Any | None = None
+    profile: ModelProfile | Any | None = None
+
+    def resolve_model_profile(
+        self,
+        *,
+        default_adapter_kind: str = "openai_compat",
+    ) -> ModelProfile:
+        return normalize_model_profile(
+            self.profile,
+            model=self.model,
+            max_tokens=self.max_tokens,
+            default_adapter_kind=default_adapter_kind,
+        )
 
 
 class OpenAICompatLLMClient:
@@ -37,8 +50,8 @@ class OpenAICompatLLMClient:
         *,
         adapter: OpenAICompatAdapter | None = None,
         transport: Transport | None = None,
-        supports_function_calling: bool = True,
-        supports_stream_usage: bool = True,
+        supports_function_calling: bool | None = None,
+        supports_stream_usage: bool | None = None,
         reasoning_effort: Literal["low", "medium", "high"] | None = None,
     ) -> None:
         self.config = config
@@ -49,16 +62,25 @@ class OpenAICompatLLMClient:
         self.reasoning_effort = reasoning_effort
 
     async def stream_turn(self, request: TurnRequest) -> AsyncIterable[StandardEvent]:
-        session = self.adapter.create_parser_session(self.config.profile)
+        model_profile = request.model_profile or self.config.resolve_model_profile()
+        session = self.adapter.create_parser_session(model_profile)
         body = self.adapter.build_request(
-            model=request.model or self.config.model,
+            model=request.model or model_profile.model,
             system_prompt=request.system_prompt or "",
             messages=_messages_to_adapter_messages(request.messages),
             tools=_tools_to_adapter_tools(request.tools),
-            max_tokens=self.config.max_tokens,
-            supports_function_calling=self.supports_function_calling,
-            supports_stream_usage=self.supports_stream_usage,
-            reasoning_effort=self.reasoning_effort,
+            max_tokens=model_profile.max_tokens or self.config.max_tokens,
+            supports_function_calling=(
+                self.supports_function_calling
+                if self.supports_function_calling is not None
+                else bool(model_profile.supports_function_calling)
+            ),
+            supports_stream_usage=(
+                self.supports_stream_usage
+                if self.supports_stream_usage is not None
+                else bool(model_profile.supports_stream_usage)
+            ),
+            reasoning_effort=self.reasoning_effort or model_profile.reasoning_effort,
         )
         async for event in _stream_with_recovery(
             transport=self.transport,
@@ -84,15 +106,22 @@ class AnthropicNativeLLMClient:
         self.thinking_budget_tokens = thinking_budget_tokens
 
     async def stream_turn(self, request: TurnRequest) -> AsyncIterable[StandardEvent]:
-        session = self.adapter.create_parser_session(self.config.profile)
+        model_profile = request.model_profile or self.config.resolve_model_profile(
+            default_adapter_kind="anthropic_native",
+        )
+        session = self.adapter.create_parser_session(model_profile)
         body = self.adapter.build_request(
-            model=request.model or self.config.model,
+            model=request.model or model_profile.model,
             system_prompt=request.system_prompt or "",
             messages=_messages_to_adapter_messages(request.messages),
             tools=_tools_to_adapter_tools(request.tools),
-            max_tokens=self.config.max_tokens,
-            profile=self.config.profile,
-            thinking_budget_tokens=self.thinking_budget_tokens,
+            max_tokens=model_profile.max_tokens or self.config.max_tokens,
+            profile=model_profile,
+            thinking_budget_tokens=(
+                self.thinking_budget_tokens
+                if self.thinking_budget_tokens is not None
+                else model_profile.thinking_budget_tokens
+            ),
         )
         async for event in _stream_with_recovery(
             transport=self.transport,

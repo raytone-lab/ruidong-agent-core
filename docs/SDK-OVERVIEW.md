@@ -10,7 +10,7 @@
 
 - `rd-agent-contracts` 定义跨包协议、数据结构和 host ports；
 - `rd-llm-adapter` 把不同 provider 的流式 chunk 归一成标准事件；
-- `rd-agent-core` 执行 turn/run kernel、AgentRunner lifecycle facade、provider LLM client glue、工具调用、事件写入、取消、运行摘要/观测和运行策略；
+- `rd-agent-core` 执行 turn/run kernel、AgentRunner lifecycle facade、provider LLM client glue、ModelProfile、SubagentRunner、工具调用、事件写入、取消、运行摘要/观测和运行策略；
 - `rd_agent_core.testing` 提供接入方可复用的本地 harness。
 
 ## 架构分层
@@ -129,9 +129,23 @@ PPT、文档、数据分析、代码执行等业务能力应该实现这些 adap
 - continuation queue job lifecycle；
 - run persistence parent/continuation linkage。
 
-当前 core 已具备运行底座，host 可以在此基础上实现更完整的 orchestrator/subagent 调度。
+当前 core 提供 `SubagentRunner`，负责 claim 子任务、创建子 run、按 profile 过滤工具、调用 `RunKernel`、构造 outcome 并写回任务终态。更高层的任务拆分、并发策略、队列事务和 UI 投影仍由 host 负责。
 
-### 8. Testing harness
+### 8. Model profile
+
+`ModelProfile` 正式描述模型运行协议，不携带 API key：
+
+- `adapter_kind` / `adapter_family`
+- `tool_protocol`
+- `reasoning_protocol`
+- `ModelCapabilities`
+- `ProtocolLimits`
+- `max_tokens` / `context_window`
+- stream usage、function calling、reasoning effort、thinking budget
+
+它可以生成 `ProviderLock`，用于防止同一 transcript 在多轮中跨 provider family 或 tool/reasoning protocol 漂移。
+
+### 9. Testing harness
 
 `rd_agent_core.testing` 是给接入方使用的测试工具，不是私有 fixture：
 
@@ -303,6 +317,6 @@ else:
 
 - `rd-agent-contracts==1.14.1`
 - `rd-llm-adapter==1.1.2`
-- `rd-agent-core==0.1.3`
+- `rd-agent-core==0.1.4`
 
 `rd-agent-core` 仍是 `0.x`，表示 runtime API 已经有清晰边界和测试保护，但在公开 1.0 前仍可能根据 host 接入反馈做小幅调整。

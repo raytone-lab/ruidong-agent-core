@@ -44,6 +44,7 @@ from rd_llm_adapter.events import (
 
 from .errors import CoreErrorType, core_error
 from .events import CoreEventType, CoreEventWriter
+from .model_profile import ModelProfile
 
 
 @dataclass(frozen=True)
@@ -53,6 +54,7 @@ class TurnRequest:
     messages: Sequence[Message]
     tool_context: ToolExecutionContext
     model: str | None = None
+    model_profile: ModelProfile | None = None
     system_prompt: str | None = None
     tools: Sequence[ToolDefinition] = ()
     turn_index: int = 0
@@ -171,6 +173,11 @@ class TurnKernel:
                 CoreEventType.TURN_STARTED,
                 {
                     "model": request.model,
+                    "model_profile": (
+                        request.model_profile.to_event_payload()
+                        if request.model_profile is not None
+                        else None
+                    ),
                     "turn_index": request.turn_index,
                     "metadata": dict(request.metadata),
                 },

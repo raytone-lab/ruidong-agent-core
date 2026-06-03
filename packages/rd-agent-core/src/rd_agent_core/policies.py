@@ -30,6 +30,18 @@ class RunLimits:
 
 
 @dataclass(frozen=True)
+class ToolRepeatPolicy:
+    """Per-tool repeat policy resolved from ``ToolDefinition.metadata``."""
+
+    disabled: bool = False
+    threshold: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.threshold is not None and self.threshold < 1:
+            raise ValueError("threshold must be >= 1 when set")
+
+
+@dataclass(frozen=True)
 class RunLimitState:
     turns_used: int = 0
     tool_calls_used: int = 0
@@ -79,6 +91,75 @@ def tool_call_signature(tool_name: str, tool_input: Mapping[str, Any]) -> ToolCa
     return ToolCallSignature(tool_name=tool_name, input_digest=sha256(encoded.encode()).hexdigest())
 
 
+def tool_repeat_policy_from_metadata(
+    metadata: Mapping[str, Any] | None,
+) -> ToolRepeatPolicy | None:
+    """Resolve repeat policy from tool metadata.
+
+    Supported metadata forms:
+
+    - ``{"repeat_policy": "allow"}`` disables repeated-call blocking.
+    - ``{"repeat_policy": {"enabled": False}}`` disables blocking.
+    - ``{"repeat_policy": {"threshold": 5}}`` overrides the run default.
+    - ``{"tool_repeat_policy": ...}`` is accepted as an explicit alias.
+    """
+
+    if not metadata:
+        return None
+    raw = metadata.get("repeat_policy")
+    if raw is None:
+        raw = metadata.get("tool_repeat_policy")
+    if raw is None:
+        return None
+
+    if isinstance(raw, str):
+        mode = raw.strip().lower()
+        if mode in {"allow", "allow_repeated", "disabled", "ignore", "off"}:
+            return ToolRepeatPolicy(disabled=True)
+        if mode in {"default", "strict", "enabled", "on"}:
+            return None
+        return None
+
+    if isinstance(raw, bool):
+        return ToolRepeatPolicy(disabled=not raw)
+
+    if isinstance(raw, int):
+        return ToolRepeatPolicy(threshold=raw) if raw >= 1 else None
+
+    if not isinstance(raw, Mapping):
+        return None
+
+    enabled = raw.get("enabled")
+    mode_value = raw.get("mode") or raw.get("behavior")
+    mode = str(mode_value).strip().lower() if mode_value is not None else ""
+    if enabled is False or mode in {"allow", "allow_repeated", "disabled", "ignore", "off"}:
+        return ToolRepeatPolicy(disabled=True)
+
+    threshold = _positive_int(raw.get("threshold"))
+    if threshold is not None:
+        return ToolRepeatPolicy(threshold=threshold)
+
+    if enabled is True or mode in {"default", "strict", "enabled", "on"}:
+        return None
+    return None
+
+
+def repeat_threshold_for_tool(
+    *,
+    tool_name: str,
+    policies: Mapping[str, ToolRepeatPolicy],
+    default_threshold: int | None,
+) -> int | None:
+    policy = policies.get(tool_name)
+    if policy is None:
+        return default_threshold
+    if policy.disabled:
+        return None
+    if policy.threshold is not None:
+        return policy.threshold
+    return default_threshold
+
+
 def has_repeated_tool_call(
     history: Iterable[ToolCallSignature],
     *,
@@ -89,3 +170,16 @@ def has_repeated_tool_call(
         raise ValueError("threshold must be >= 1")
     repeated = sum(1 for item in history if item == candidate)
     return repeated >= threshold
+
+
+def _positive_int(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value >= 1 else None
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped.isdigit():
+            parsed = int(stripped)
+            return parsed if parsed >= 1 else None
+    return None

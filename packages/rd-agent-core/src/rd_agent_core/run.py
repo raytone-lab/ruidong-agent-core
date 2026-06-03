@@ -29,12 +29,16 @@ from rd_agent_contracts import (
 
 from .errors import CoreErrorType, core_error
 from .events import CoreEventWriter
+from .model_profile import ModelProfile
 from .policies import (
     RunLimits,
     RunLimitState,
     ToolCallSignature,
+    ToolRepeatPolicy,
     evaluate_run_limits,
+    repeat_threshold_for_tool,
     tool_call_signature,
+    tool_repeat_policy_from_metadata,
 )
 from .turn import (
     CoreToolPolicy,
@@ -60,6 +64,7 @@ class RunRequest:
     tool_context: ToolExecutionContext
     tools: tuple[ToolDefinition, ...] = ()
     model: str | None = None
+    model_profile: ModelProfile | None = None
     system_prompt: str | None = None
     limits: RunLimits = field(default_factory=RunLimits)
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -143,6 +148,7 @@ class RunKernel:
             turn_id = str(self._id_generator.turn_id())
             tool_executor = self._guarded_tool_executor(
                 request.limits,
+                tools=request.tools,
                 tool_signatures=tool_signatures,
                 tool_calls_used=tool_calls_count,
             )
@@ -160,6 +166,7 @@ class RunKernel:
                     messages=tuple(messages),
                     tool_context=request.tool_context,
                     model=request.model,
+                    model_profile=request.model_profile,
                     system_prompt=request.system_prompt,
                     tools=request.tools,
                     turn_index=turn_index,
@@ -207,6 +214,7 @@ class RunKernel:
         self,
         limits: RunLimits,
         *,
+        tools: tuple[ToolDefinition, ...],
         tool_signatures: list[ToolCallSignature],
         tool_calls_used: int,
     ) -> ToolExecutorLike | None:
@@ -219,11 +227,17 @@ class RunKernel:
                 max_tool_calls=limits.max_tool_calls,
                 tool_calls_used=tool_calls_used,
             )
-        if limits.repeated_tool_call_threshold is not None:
+        tool_repeat_policies = {
+            tool.name: policy
+            for tool in tools
+            if (policy := tool_repeat_policy_from_metadata(tool.metadata)) is not None
+        }
+        if limits.repeated_tool_call_threshold is not None or tool_repeat_policies:
             executor = _RepeatedToolCallGuard(
                 executor=executor,
                 signatures=tool_signatures,
-                threshold=limits.repeated_tool_call_threshold,
+                default_threshold=limits.repeated_tool_call_threshold,
+                tool_repeat_policies=tool_repeat_policies,
             )
         return executor
 
@@ -270,20 +284,31 @@ class _RepeatedToolCallGuard:
         *,
         executor: ToolExecutorLike,
         signatures: list[ToolCallSignature],
-        threshold: int,
+        default_threshold: int | None,
+        tool_repeat_policies: dict[str, ToolRepeatPolicy],
     ) -> None:
-        if threshold < 1:
-            raise ValueError("threshold must be >= 1")
+        if default_threshold is not None and default_threshold < 1:
+            raise ValueError("default_threshold must be >= 1")
         self._executor = executor
         self._signatures = signatures
-        self._threshold = threshold
+        self._default_threshold = default_threshold
+        self._tool_repeat_policies = tool_repeat_policies
 
     async def execute_tool(self, request: ToolExecutionRequest) -> ToolExecutionResult:
+        threshold = repeat_threshold_for_tool(
+            tool_name=request.tool_name,
+            policies=self._tool_repeat_policies,
+            default_threshold=self._default_threshold,
+        )
+        if threshold is None:
+            raw_result = self._executor.execute_tool(request)
+            return await raw_result if inspect.isawaitable(raw_result) else raw_result
+
         candidate = tool_call_signature(request.tool_name, request.tool_input)
         occurrences_including_current = (
             sum(1 for signature in self._signatures if signature == candidate) + 1
         )
-        if occurrences_including_current >= self._threshold:
+        if occurrences_including_current >= threshold:
             return ToolExecutionResult(
                 ok=False,
                 content="Repeated tool call blocked by run policy.",
@@ -293,6 +318,8 @@ class _RepeatedToolCallGuard:
                     details={
                         "tool_name": request.tool_name,
                         "tool_use_id": request.tool_use_id,
+                        "threshold": threshold,
+                        "occurrences": occurrences_including_current,
                     },
                 ),
             )

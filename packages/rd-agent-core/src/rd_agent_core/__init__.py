@@ -25,6 +25,12 @@ from .llm_clients import (
     OpenAICompatLLMClient,
     ProviderClientConfig,
 )
+from .model_profile import (
+    ModelProfile,
+    ReasoningEffort,
+    model_profile_to_dict,
+    normalize_model_profile,
+)
 from .observability import (
     AsyncRunObserverPort,
     RunObserverLike,
@@ -36,9 +42,12 @@ from .policies import (
     RunLimits,
     RunLimitState,
     ToolCallSignature,
+    ToolRepeatPolicy,
     evaluate_run_limits,
     has_repeated_tool_call,
+    repeat_threshold_for_tool,
     tool_call_signature,
+    tool_repeat_policy_from_metadata,
 )
 from .run import (
     RunKernel,
@@ -47,6 +56,11 @@ from .run import (
     build_messages_after_turn,
 )
 from .runner import AgentRunner, AgentRunnerRequest, AgentRunnerResult
+from .subagent_runner import (
+    SubagentRunner,
+    SubagentRunnerRequest,
+    SubagentRunnerResult,
+)
 from .summary import RunSummary, summarize_failed_run, summarize_kernel_result
 from .turn import (
     AsyncToolExecutorPort,
@@ -59,7 +73,7 @@ from .turn import (
     TurnRequest,
 )
 
-__version__ = "0.1.3"
+__version__ = "0.1.4"
 
 __all__ = [
     "ArtifactDescriptor",
@@ -82,9 +96,11 @@ __all__ = [
     "CoreErrorType",
     "CoreToolPolicy",
     "LLMClientPort",
+    "ModelProfile",
     "OpenAICompatLLMClient",
     "PromptSection",
     "ProviderClientConfig",
+    "ReasoningEffort",
     "RunLimitDecision",
     "RunKernel",
     "RunKernelResult",
@@ -94,8 +110,12 @@ __all__ = [
     "RunObserverPort",
     "RunRequest",
     "RunSummary",
+    "SubagentRunner",
+    "SubagentRunnerRequest",
+    "SubagentRunnerResult",
     "ToolCallSignature",
     "ToolExecutorLike",
+    "ToolRepeatPolicy",
     "ToolSafetyPolicy",
     "TurnKernel",
     "TurnKernelResult",
@@ -110,8 +130,12 @@ __all__ = [
     "core_error",
     "evaluate_run_limits",
     "has_repeated_tool_call",
+    "model_profile_to_dict",
     "notify_run_observer",
+    "normalize_model_profile",
+    "repeat_threshold_for_tool",
     "summarize_failed_run",
     "summarize_kernel_result",
     "tool_call_signature",
+    "tool_repeat_policy_from_metadata",
 ]

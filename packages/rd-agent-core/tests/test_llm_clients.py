@@ -16,6 +16,7 @@ from rd_agent_contracts import (
 )
 from rd_agent_core import (
     AnthropicNativeLLMClient,
+    ModelProfile,
     OpenAICompatLLMClient,
     ProviderClientConfig,
     TurnRequest,
@@ -163,6 +164,37 @@ async def test_openai_compat_llm_client_recovers_partial_error_output() -> None:
     assert done.text_blocks[0] == TextBlock("partial")
 
 
+async def test_openai_compat_llm_client_uses_model_profile_defaults() -> None:
+    transport = FakeTransport(
+        [{"choices": [{"delta": {"content": "done"}, "finish_reason": "stop"}]}]
+    )
+    client = OpenAICompatLLMClient(
+        ProviderClientConfig(
+            model="fallback-model",
+            api_key="key",
+            base_url="base",
+            profile=ModelProfile(
+                profile_id="profile-1",
+                model="profile-model",
+                max_tokens=123,
+                supports_function_calling=False,
+                supports_stream_usage=False,
+                reasoning_effort="high",
+            ),
+        ),
+        transport=transport,
+    )
+
+    _ = [event async for event in client.stream_turn(_turn_request())]
+
+    request_body = transport.requests[0]
+    assert request_body["model"] == "profile-model"
+    assert request_body["max_tokens"] == 123
+    assert request_body["reasoning_effort"] == "high"
+    assert "stream_options" not in request_body
+    assert "tools" not in request_body
+
+
 async def test_openai_compat_llm_client_reraises_error_without_partial_output() -> None:
     transport = FakeTransport([RuntimeError("stream failed")])
     client = OpenAICompatLLMClient(
@@ -212,3 +244,37 @@ async def test_anthropic_native_llm_client_streams_standard_events() -> None:
         "type": "enabled",
         "budget_tokens": 128,
     }
+
+
+async def test_anthropic_native_llm_client_defaults_to_anthropic_profile() -> None:
+    transport = FakeTransport(
+        [
+            {
+                "type": "content_block_start",
+                "index": 0,
+                "content_block": {"type": "text"},
+            },
+            {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "text_delta", "text": "ok"},
+            },
+            {"type": "content_block_stop", "index": 0},
+            {"type": "message_delta", "delta": {"stop_reason": "end_turn"}},
+            {"type": "message_stop"},
+        ]
+    )
+    client = AnthropicNativeLLMClient(
+        ProviderClientConfig(
+            model="claude",
+            api_key="key",
+            base_url="https://api.anthropic.com",
+        ),
+        transport=transport,
+    )
+
+    _ = [event async for event in client.stream_turn(_turn_request())]
+
+    assert client.config.resolve_model_profile(
+        default_adapter_kind="anthropic_native"
+    ).resolved_tool_protocol == "anthropic_tool_use"

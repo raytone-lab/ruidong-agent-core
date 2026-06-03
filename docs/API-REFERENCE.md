@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | `rd-agent-contracts` | `1.14.1` | 数据结构、运行合同、host ports、`py.typed` |
 | `rd-llm-adapter` | `1.1.2` | Provider 请求构造、流式 chunk 解析、标准事件、`py.typed` |
-| `rd-agent-core` | `0.1.3` | Turn/Run kernel、AgentRunner、provider LLM client、事件写入、运行策略、取消、运行摘要/观测、conformance、业务 adapter 边界、testing harness |
+| `rd-agent-core` | `0.1.4` | Turn/Run kernel、AgentRunner、provider LLM client、ModelProfile、SubagentRunner、事件写入、运行策略、取消、运行摘要/观测、conformance、业务 adapter 边界、testing harness |
 
 ## rd-agent-core
 
@@ -19,8 +19,12 @@
 - `AgentRunnerResult`
 - `RunKernel`
 - `RunRequest`
+- `ModelProfile`
 - `RunSummary`
 - `RunObserverPort`
+- `SubagentRunner`
+- `SubagentRunnerRequest`
+- `SubagentRunnerResult`
 - `TurnKernel`
 - `TurnRequest`
 - `ToolSafetyPolicy`
@@ -96,6 +100,7 @@ RunRequest(
     tool_context: ToolExecutionContext,
     tools: tuple[ToolDefinition, ...] = (),
     model: str | None = None,
+    model_profile: ModelProfile | None = None,
     system_prompt: str | None = None,
     limits: RunLimits = RunLimits(),
     metadata: dict[str, Any] = {},
@@ -113,6 +118,7 @@ RunRequest(
 | `tool_context` | 工具执行上下文，承载 project/session/user_request 等 host 信息 |
 | `tools` | 本次 run 暴露给模型的工具定义 |
 | `model` | host 选择的模型名 |
+| `model_profile` | 规范化模型 profile，描述 adapter/tool/reasoning protocol 和能力边界 |
 | `system_prompt` | system prompt |
 | `limits` | turn/tool/time/repeated-call 限制 |
 | `metadata` | 透传到 turn started 事件的元数据 |
@@ -171,6 +177,7 @@ TurnRequest(
     messages: Sequence[Message],
     tool_context: ToolExecutionContext,
     model: str | None = None,
+    model_profile: ModelProfile | None = None,
     system_prompt: str | None = None,
     tools: Sequence[ToolDefinition] = (),
     turn_index: int = 0,
@@ -258,6 +265,40 @@ core_error(error_type, message, category=None, details=None)
 ```
 
 工具失败结果中的 `error.type` 保留具体原因，`error.category` 用于跨 provider / tool / policy 的统一聚合。当前分类包括 `tool_policy`、`tool_unavailable`、`tool_error`、`run_limit`、`cancelled`、`provider`、`invalid_tool_call`、`internal`。
+
+### `ModelProfile`
+
+正式模型 profile 层。它不包含 API key 或租户秘密，只描述模型运行协议和能力边界。
+
+```python
+ModelProfile(
+    profile_id: str,
+    model: str,
+    provider_id: str = "",
+    adapter_kind: str = "openai_compat",
+    adapter_family: str | None = None,
+    tool_protocol: str | None = None,
+    reasoning_protocol: str | None = None,
+    capabilities: ModelCapabilities = ModelCapabilities(),
+    protocol_limits: ProtocolLimits = ProtocolLimits(),
+    max_tokens: int | None = None,
+    context_window: int | None = None,
+    supports_function_calling: bool | None = None,
+    supports_stream_usage: bool | None = None,
+    reasoning_effort: Literal["low", "medium", "high"] | None = None,
+    thinking_budget_tokens: int | None = None,
+    metadata: Mapping[str, Any] = {},
+)
+```
+
+常用 helper：
+
+- `normalize_model_profile(raw, model=..., max_tokens=...)`：兼容 dict、对象和已规范化 profile；
+- `model_profile_to_dict(profile)`：输出 JSON-friendly profile；
+- `profile.to_provider_lock(run_id=...)`：生成 `ProviderLock`；
+- `profile.is_compatible_with(lock)`：校验已有 transcript provider lock。
+
+`ProviderClientConfig.resolve_model_profile()` 会把 `profile` 规范化；`RunRequest` / `TurnRequest` 也可以直接传入 `model_profile`，provider client 会优先使用 request 上的 profile。
 
 ### `ToolExecutorLike`
 
@@ -366,15 +407,15 @@ ProviderClientConfig(
     timeout: float = 60.0,
     max_tokens: int = 4096,
     extra_headers: Mapping[str, str] | None = None,
-    profile: Any | None = None,
+    profile: ModelProfile | Any | None = None,
 )
 
 OpenAICompatLLMClient(
     config,
     adapter=None,
     transport=None,
-    supports_function_calling=True,
-    supports_stream_usage=True,
+    supports_function_calling=None,
+    supports_stream_usage=None,
     reasoning_effort=None,
 )
 AnthropicNativeLLMClient(config, adapter=None, transport=None, thinking_budget_tokens=None)
@@ -500,6 +541,45 @@ await assert_tool_executor_port_conformance(executor, request=...)
 - `EventLogPort` 的 idempotency、per-run seq、`from_seq` exclusive 语义；
 - `RunPersistencePort` 的 root/running/completed/continuation parent/max_continuations 语义；
 - `ToolExecutorPort` 的返回类型和 error shape。
+
+## rd_agent_core.subagent_runner
+
+`SubagentRunner` 是基于现有 contracts 的高层子任务 runner。它不创建数据库 schema，也不绑定队列实现；它只串起公共 port 的生命周期：
+
+- `SubagentTaskPort.claim_next_pending()` / `mark_attempt_started()`；
+- `SubagentRunPort.create_run_for_task()`；
+- 按 `SubagentProfile` 过滤工具；
+- 用 `RunKernel` 执行子任务；
+- 根据 stop reason 构造 outcome JSON 并写回 `mark_completed`、`mark_waiting`、`record_failure` 或 `mark_failed`；
+- 可选 `SubagentWorkspacePort.prepare_workspace()` 和 merge-back；
+- 可选 `RunObserverPort` 输出 `RunSummary`。
+
+公开入口：
+
+- `SubagentRunner`
+- `SubagentRunnerRequest`
+- `SubagentRunnerResult`
+
+```python
+runner = SubagentRunner(
+    task_port=subagent_task_port,
+    run_port=subagent_run_port,
+    event_log=event_log,
+    llm_client=llm_client,
+    tool_executor=tool_executor,
+)
+
+result = await runner.run_next(
+    SubagentRunnerRequest(
+        user_request_id="request-1",
+        tools=tuple(all_tools),
+        model_profile=model_profile,
+        limits=RunLimits(max_turns=4, max_tool_calls=12),
+    )
+)
+```
+
+`SubagentRunnerResult` 包含 claimed task、attempted task、created run、completed task、`RunKernelResult`、events、`RunSummary` 和可选 workspace merge result。
 
 ## rd-agent-contracts
 

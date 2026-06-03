@@ -25,6 +25,7 @@ from rd_agent_contracts import (
 )
 
 from .events import CoreEventWriter
+from .model_profile import ModelProfile
 from .observability import RunObserverLike, notify_run_observer
 from .policies import RunLimits
 from .run import RunKernel, RunKernelResult, RunRequest
@@ -42,6 +43,7 @@ class AgentRunnerRequest:
     run_id: str | None = None
     max_continuations: int = 0
     model: str | None = None
+    model_profile: ModelProfile | None = None
     system_prompt: str | None = None
     limits: RunLimits | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
@@ -113,6 +115,7 @@ class AgentRunner:
                     tool_context=self._resolve_tool_context(request, run_id=run.run_id),
                     tools=tuple(request.tools),
                     model=request.model,
+                    model_profile=request.model_profile,
                     system_prompt=request.system_prompt,
                     limits=request.limits or _limits_from_budget(request.budget),
                     metadata=dict(request.metadata),

@@ -5,7 +5,9 @@ from rd_agent_core import (
     RunLimitState,
     evaluate_run_limits,
     has_repeated_tool_call,
+    repeat_threshold_for_tool,
     tool_call_signature,
+    tool_repeat_policy_from_metadata,
 )
 
 
@@ -54,3 +56,33 @@ def test_repeated_tool_call_detection_uses_threshold() -> None:
 
     assert has_repeated_tool_call([candidate, other, candidate], candidate=candidate, threshold=2)
     assert not has_repeated_tool_call([candidate, other], candidate=candidate, threshold=2)
+
+
+def test_tool_repeat_policy_can_disable_repeat_guard_from_metadata() -> None:
+    policy = tool_repeat_policy_from_metadata({"repeat_policy": {"mode": "allow"}})
+
+    assert policy is not None
+    assert repeat_threshold_for_tool(
+        tool_name="browser_snapshot",
+        policies={"browser_snapshot": policy},
+        default_threshold=3,
+    ) is None
+
+
+def test_tool_repeat_policy_can_override_default_threshold_from_metadata() -> None:
+    policy = tool_repeat_policy_from_metadata({"repeat_policy": {"threshold": "5"}})
+
+    assert policy is not None
+    assert repeat_threshold_for_tool(
+        tool_name="browser_click",
+        policies={"browser_click": policy},
+        default_threshold=3,
+    ) == 5
+
+
+def test_tool_repeat_policy_falls_back_to_run_default_without_metadata() -> None:
+    assert repeat_threshold_for_tool(
+        tool_name="read_file",
+        policies={},
+        default_threshold=3,
+    ) == 3
