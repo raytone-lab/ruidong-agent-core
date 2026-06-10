@@ -40,9 +40,39 @@ class ToolExecutionRequest:
 
 
 @dataclass(frozen=True)
+class ToolCallCounts:
+    requested: int = 0
+    executed: int = 0
+    denied: int = 0
+
+    def __post_init__(self) -> None:
+        for field_name in ("requested", "executed", "denied"):
+            if getattr(self, field_name) < 0:
+                raise ValueError(f"{field_name} must be >= 0")
+
+    def to_json(self) -> dict[str, int]:
+        return {
+            "requested": self.requested,
+            "executed": self.executed,
+            "denied": self.denied,
+        }
+
+    @classmethod
+    def from_json(cls, raw: Mapping[str, Any] | None) -> ToolCallCounts:
+        if raw is None:
+            return cls()
+        return cls(
+            requested=int(raw.get("requested", 0) or 0),
+            executed=int(raw.get("executed", 0) or 0),
+            denied=int(raw.get("denied", 0) or 0),
+        )
+
+
+@dataclass(frozen=True)
 class ToolExecutionResult:
     ok: bool
     content: str
+    tool_use_id: str
     error: dict[str, Any] | None = None
     duration_ms: int | None = None
     metadata: dict[str, Any] = field(default_factory=dict)

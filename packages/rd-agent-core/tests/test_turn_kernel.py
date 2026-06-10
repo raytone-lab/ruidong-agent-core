@@ -75,7 +75,12 @@ class _ToolExecutor:
 
     def execute_tool(self, request: ToolExecutionRequest) -> ToolExecutionResult:
         self.requests.append(request)
-        return ToolExecutionResult(ok=True, content=f"ran {request.tool_name}", duration_ms=3)
+        return ToolExecutionResult(
+            ok=True,
+            content=f"ran {request.tool_name}",
+            tool_use_id=request.tool_use_id or "",
+            duration_ms=3,
+        )
 
 
 class _AsyncToolExecutor:
@@ -84,7 +89,11 @@ class _AsyncToolExecutor:
 
     async def execute_tool(self, request: ToolExecutionRequest) -> ToolExecutionResult:
         self.requests.append(request)
-        return ToolExecutionResult(ok=True, content=f"async ran {request.tool_name}")
+        return ToolExecutionResult(
+            ok=True,
+            content=f"async ran {request.tool_name}",
+            tool_use_id=request.tool_use_id or "",
+        )
 
 
 class _Observability:
@@ -113,6 +122,28 @@ def _request() -> TurnRequest:
         messages=[],
         tool_context=ToolExecutionContext(project_id="project-1", session_id="session-1"),
         model="test-model",
+        tools=(
+            ToolDefinition(
+                name="read_file",
+                description="Read",
+                input_schema={"type": "object"},
+            ),
+            ToolDefinition(
+                name="write_file",
+                description="Write",
+                input_schema={"type": "object"},
+            ),
+            ToolDefinition(
+                name="ask_user",
+                description="Ask user",
+                input_schema={"type": "object"},
+            ),
+            ToolDefinition(
+                name="collect_user_confirmation",
+                description="Collect confirmation",
+                input_schema={"type": "object"},
+            ),
+        ),
         turn_index=2,
     )
 
@@ -512,6 +543,7 @@ async def test_turn_kernel_fails_closed_when_executor_is_missing() -> None:
         "type": "tool_executor_missing",
         "message": "No ToolExecutorPort was provided for tool execution.",
         "category": "tool_unavailable",
+        "details": {"tool_name": "write_file", "tool_use_id": "tool-1"},
     }
     assert CoreEventType.TOOL_FAILED in [event.event_type for event in result.events]
 
@@ -559,6 +591,7 @@ async def test_turn_kernel_fails_closed_for_undeclared_tool_call() -> None:
         "type": "tool_not_declared",
         "message": "Tool is not declared for this turn: delete_project",
         "category": "tool_unavailable",
+        "details": {"tool_name": "delete_project", "tool_use_id": "tool-1"},
     }
 
 

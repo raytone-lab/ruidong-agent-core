@@ -10,6 +10,7 @@ from rd_agent_contracts.run_persistence import (
     RunResultMetadata,
     RunScope,
     RunStatus,
+    ToolCallCounts,
 )
 from rd_agent_contracts.usage import Usage
 
@@ -43,7 +44,7 @@ def test_result_metadata_json_roundtrip_preserves_extra_fields():
     metadata = RunResultMetadata(
         usage=Usage(input_tokens=10, output_tokens=5),
         turns_count=3,
-        tool_calls_count=2,
+        tool_call_counts=ToolCallCounts(requested=3, executed=2, denied=1),
         extra={"provider": "anthropic"},
     )
 
@@ -52,6 +53,7 @@ def test_result_metadata_json_roundtrip_preserves_extra_fields():
     assert restored.usage.total() == 15
     assert restored.turns_count == 3
     assert restored.tool_calls_count == 2
+    assert restored.tool_call_counts == ToolCallCounts(requested=3, executed=2, denied=1)
     assert restored.extra == {"provider": "anthropic"}
 
 

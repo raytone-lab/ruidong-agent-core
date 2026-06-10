@@ -18,6 +18,7 @@ def test_run_policy_stop_reason_sets_match_current_lifecycle_contract():
         {
             "max_turns",
             "max_wall_clock",
+            "error",
             "timeout_ms",
             "loop_break:max_turns",
             "loop_break:no_progress",
@@ -124,10 +125,24 @@ def test_completion_status_for_stop_reason():
     )
     assert (
         completion_status_for_stop_reason(
+            stop_reason="error",
+            can_auto_continue=False,
+        )
+        == RunStatus.NEEDS_ATTENTION
+    )
+    assert (
+        completion_status_for_stop_reason(
             stop_reason="timeout_ms",
             can_auto_continue=False,
         )
         == RunStatus.NEEDS_ATTENTION
+    )
+    assert (
+        completion_status_for_stop_reason(
+            stop_reason="cancelled",
+            can_auto_continue=False,
+        )
+        == RunStatus.CANCELLED
     )
     assert (
         completion_status_for_stop_reason(

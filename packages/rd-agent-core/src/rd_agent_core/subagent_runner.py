@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any
@@ -25,14 +26,17 @@ from rd_agent_contracts import (
     ToolExecutionContext,
     ToolObservabilityPort,
     ToolUseBlock,
+    build_subagent_aggregate_outcome,
     build_subagent_instruction_text,
     build_subagent_outcome_json,
     decide_subagent_finalization,
     filter_subagent_tools_for_profile,
+    format_subagent_aggregate,
     needs_attention_for_stop_reason,
     should_merge_subagent_workspace,
 )
 
+from .errors import CoreErrorType
 from .events import CoreEventWriter
 from .model_profile import ModelProfile
 from .observability import RunObserverLike, notify_run_observer
@@ -75,6 +79,37 @@ class SubagentRunnerResult:
     summary: RunSummary
     workspace: SubagentWorkspaceHandle | None = None
     workspace_merge_result: SubagentWorkspaceMergeResult | None = None
+
+
+@dataclass(frozen=True)
+class SubagentBatchRunnerRequest:
+    user_request_id: str
+    worker_id: str | None = None
+    max_count: int = 4
+    candidate_limit: int | None = None
+    started_at_ms: int | None = None
+    runner_request: SubagentRunnerRequest = field(default_factory=SubagentRunnerRequest)
+
+    def __post_init__(self) -> None:
+        if self.max_count < 1:
+            raise ValueError("max_count must be >= 1")
+
+
+@dataclass(frozen=True)
+class SubagentBatchRunnerError:
+    task_id: str
+    error_type: str
+    message: str
+
+
+@dataclass(frozen=True)
+class SubagentBatchRunnerResult:
+    claimed_tasks: tuple[SubagentTaskRecord, ...]
+    results: tuple[SubagentRunnerResult, ...]
+    completed_tasks: tuple[SubagentTaskRecord, ...]
+    aggregate_outcome: dict[str, Any]
+    aggregate_text: str
+    errors: tuple[SubagentBatchRunnerError, ...] = ()
 
 
 class SubagentRunner:
@@ -177,9 +212,14 @@ class SubagentRunner:
                 )
             )
             events = tuple(self._event_log.stream_events(run.run_id))
+            summary_status = (
+                "cancelled"
+                if kernel_result.stop_reason == CoreErrorType.CANCELLED.value
+                else "completed"
+            )
             summary = summarize_kernel_result(
                 run_id=run.run_id,
-                status="completed",
+                status=summary_status,
                 kernel_result=kernel_result,
                 events=events,
                 metadata={"subagent_task_id": attempted_task.task_id},
@@ -207,6 +247,19 @@ class SubagentRunner:
                 workspace=workspace,
                 workspace_merge_result=merge_result,
             )
+        except asyncio.CancelledError:
+            events = tuple(self._event_log.stream_events(run.run_id))
+            summary = summarize_failed_run(
+                run_id=run.run_id,
+                status="cancelled",
+                stop_reason=CoreErrorType.CANCELLED.value,
+                error_message="cancelled",
+                events=events,
+                metadata={"subagent_task_id": attempted_task.task_id},
+            )
+            self._record_task_cancelled(attempted_task)
+            await notify_run_observer(self._run_observer, summary)
+            raise
         except Exception as exc:
             events = tuple(self._event_log.stream_events(run.run_id))
             summary = summarize_failed_run(
@@ -303,6 +356,28 @@ class SubagentRunner:
         summary: RunSummary,
         request: SubagentRunnerRequest,
     ) -> SubagentTaskRecord:
+        if kernel_result.stop_reason == CoreErrorType.CANCELLED.value:
+            outcome = build_subagent_outcome_json(
+                stop_reason=kernel_result.stop_reason,
+                tool_history=_tool_history_from_kernel_result(kernel_result),
+                tool_calls_count=kernel_result.tool_calls_count,
+                turns_count=kernel_result.turns_count,
+                summary="cancelled",
+                task_status=SubagentTaskStatus.CANCELLED.value,
+                agent_profile=task.agent_profile,
+                write_scope_json=task.write_scope_json,
+                error_message="cancelled",
+                failure={"type": "CancelledError", "message": "cancelled"},
+            )
+            completed = self._task_port.mark_cancelled(
+                task_id=task.task_id,
+                error_message="cancelled",
+                outcome_json=outcome,
+            )
+            if completed is None:
+                raise RuntimeError(f"subagent task disappeared: {task.task_id}")
+            return completed
+
         needs_attention = needs_attention_for_stop_reason(kernel_result.stop_reason)
         result_summary = summary.output_text or kernel_result.stop_reason
         decision = decide_subagent_finalization(
@@ -390,6 +465,28 @@ class SubagentRunner:
             outcome_json=outcome,
         )
 
+    def _record_task_cancelled(
+        self,
+        task: SubagentTaskRecord,
+    ) -> SubagentTaskRecord | None:
+        outcome = build_subagent_outcome_json(
+            stop_reason=CoreErrorType.CANCELLED.value,
+            tool_history=(),
+            tool_calls_count=0,
+            turns_count=0,
+            summary="cancelled",
+            task_status=SubagentTaskStatus.CANCELLED.value,
+            agent_profile=task.agent_profile,
+            write_scope_json=task.write_scope_json,
+            error_message="cancelled",
+            failure={"type": "CancelledError", "message": "cancelled"},
+        )
+        return self._task_port.mark_cancelled(
+            task_id=task.task_id,
+            error_message="cancelled",
+            outcome_json=outcome,
+        )
+
     def _merge_workspace_if_needed(
         self,
         workspace: SubagentWorkspaceHandle | None,
@@ -406,6 +503,64 @@ class SubagentRunner:
         ):
             return None
         return workspace.merge_back(cleanup=True)
+
+
+class SubagentBatchRunner:
+    """Fan out claimed subagent tasks and fan in their structured outcomes."""
+
+    def __init__(
+        self,
+        *,
+        task_port: SubagentTaskPort,
+        runner: SubagentRunner,
+    ) -> None:
+        self._task_port = task_port
+        self._runner = runner
+
+    async def run_batch(
+        self,
+        request: SubagentBatchRunnerRequest,
+    ) -> SubagentBatchRunnerResult:
+        tasks = tuple(
+            self._task_port.claim_pending_batch(
+                user_request_id=request.user_request_id,
+                worker_id=request.worker_id,
+                max_count=request.max_count,
+                candidate_limit=request.candidate_limit,
+                started_at_ms=request.started_at_ms,
+            )
+        )
+        results: list[SubagentRunnerResult] = []
+        errors: list[SubagentBatchRunnerError] = []
+
+        for task in tasks:
+            try:
+                results.append(
+                    await self._runner.run_claimed_task(
+                        task,
+                        request.runner_request,
+                    )
+                )
+            except Exception as exc:
+                errors.append(
+                    SubagentBatchRunnerError(
+                        task_id=task.task_id,
+                        error_type=exc.__class__.__name__,
+                        message=str(exc),
+                    )
+                )
+
+        completed_tasks = tuple(
+            self._task_port.load_task(task.task_id) or task for task in tasks
+        )
+        return SubagentBatchRunnerResult(
+            claimed_tasks=tasks,
+            results=tuple(results),
+            completed_tasks=completed_tasks,
+            aggregate_outcome=build_subagent_aggregate_outcome(completed_tasks),
+            aggregate_text=format_subagent_aggregate(completed_tasks),
+            errors=tuple(errors),
+        )
 
 
 def _tool_history_from_kernel_result(

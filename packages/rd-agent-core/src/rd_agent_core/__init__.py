@@ -18,6 +18,12 @@ from .conformance import (
     assert_run_persistence_port_conformance,
     assert_tool_executor_port_conformance,
 )
+from .continuation_runner import (
+    ContinuationRunner,
+    ContinuationRunnerRequest,
+    ContinuationRunnerResult,
+)
+from .continuation_state import ContinuationState, continuation_state_from_kernel_result
 from .errors import CoreErrorCategory, CoreErrorType, classify_core_error, core_error
 from .events import CoreEventType, CoreEventWriter
 from .llm_clients import (
@@ -57,6 +63,10 @@ from .run import (
 )
 from .runner import AgentRunner, AgentRunnerRequest, AgentRunnerResult
 from .subagent_runner import (
+    SubagentBatchRunner,
+    SubagentBatchRunnerError,
+    SubagentBatchRunnerRequest,
+    SubagentBatchRunnerResult,
     SubagentRunner,
     SubagentRunnerRequest,
     SubagentRunnerResult,
@@ -67,6 +77,9 @@ from .turn import (
     CoreToolPolicy,
     LLMClientPort,
     ToolExecutorLike,
+    ToolInputValidator,
+    ToolOutputBlobWriter,
+    ToolOutputLimiter,
     ToolSafetyPolicy,
     TurnKernel,
     TurnKernelResult,
@@ -88,6 +101,10 @@ __all__ = [
     "BusinessAgentProfile",
     "BusinessTask",
     "BusinessToolProviderPort",
+    "ContinuationRunner",
+    "ContinuationRunnerRequest",
+    "ContinuationRunnerResult",
+    "ContinuationState",
     "ContextProviderPort",
     "AsyncToolExecutorPort",
     "CoreEventType",
@@ -110,11 +127,18 @@ __all__ = [
     "RunObserverPort",
     "RunRequest",
     "RunSummary",
+    "SubagentBatchRunner",
+    "SubagentBatchRunnerError",
+    "SubagentBatchRunnerRequest",
+    "SubagentBatchRunnerResult",
     "SubagentRunner",
     "SubagentRunnerRequest",
     "SubagentRunnerResult",
     "ToolCallSignature",
     "ToolExecutorLike",
+    "ToolOutputBlobWriter",
+    "ToolInputValidator",
+    "ToolOutputLimiter",
     "ToolRepeatPolicy",
     "ToolSafetyPolicy",
     "TurnKernel",
@@ -127,6 +151,7 @@ __all__ = [
     "assert_tool_executor_port_conformance",
     "build_messages_after_turn",
     "classify_core_error",
+    "continuation_state_from_kernel_result",
     "core_error",
     "evaluate_run_limits",
     "has_repeated_tool_call",

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
@@ -19,11 +20,15 @@ from rd_agent_contracts import (
     RunRecord,
     RunResultMetadata,
     RunScope,
+    RunStatus,
     ToolDefinition,
     ToolExecutionContext,
     ToolObservabilityPort,
+    completion_status_for_stop_reason,
+    should_auto_continue_run,
 )
 
+from .continuation_state import continuation_state_from_kernel_result
 from .events import CoreEventWriter
 from .model_profile import ModelProfile
 from .observability import RunObserverLike, notify_run_observer
@@ -123,16 +128,32 @@ class AgentRunner:
                 )
             )
             events = tuple(self._event_log.stream_events(run.run_id))
+            final_status = completion_status_for_stop_reason(
+                stop_reason=kernel_result.stop_reason,
+                can_auto_continue=should_auto_continue_run(
+                    auto_continue_enabled=request.max_continuations > 0,
+                    agent_kind=str(run.scope.agent_kind),
+                    subagent_task_id=run.scope.subagent_task_id,
+                    stop_reason=kernel_result.stop_reason,
+                    continuation_index=run.continuation_index,
+                    max_continuations=run.max_continuations,
+                ),
+            )
             completed = self._run_persistence.mark_completed(
                 run.run_id,
                 completion=RunCompletion(
                     stop_reason=kernel_result.stop_reason,
+                    status=final_status,
                     metadata=RunResultMetadata(
                         usage=kernel_result.usage,
                         turns_count=kernel_result.turns_count,
-                        tool_calls_count=kernel_result.tool_calls_count,
+                        tool_call_counts=kernel_result.tool_call_counts,
                         extra={"event_count": len(kernel_result.events)},
                     ),
+                    engine_state_json=continuation_state_from_kernel_result(
+                        messages=kernel_result.messages,
+                        turns_count=kernel_result.turns_count,
+                    ).to_json(),
                 ),
             )
             if completed is None:
@@ -151,6 +172,26 @@ class AgentRunner:
                 events=events,
                 summary=summary,
             )
+        except asyncio.CancelledError:
+            completed = self._run_persistence.mark_completed(
+                run.run_id,
+                completion=RunCompletion(
+                    stop_reason="cancelled",
+                    status=RunStatus.CANCELLED.value,
+                    metadata=RunResultMetadata(),
+                ),
+            )
+            summary = summarize_failed_run(
+                run_id=run.run_id,
+                status=RunStatus.CANCELLED.value,
+                stop_reason="cancelled",
+                error_message="cancelled",
+                events=self._event_log.stream_events(run.run_id),
+            )
+            if completed is None:
+                raise RuntimeError(f"cancelled run disappeared: {run.run_id}") from None
+            await notify_run_observer(self._run_observer, summary)
+            raise
         except Exception as exc:
             self._run_persistence.mark_failed(
                 run.run_id,

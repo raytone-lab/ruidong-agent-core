@@ -6,7 +6,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from rd_agent_contracts import AgentEvent, StandardContentBlock, TextBlock, Usage
+from rd_agent_contracts import AgentEvent, StandardContentBlock, TextBlock, ToolCallCounts, Usage
 
 from .run import RunKernelResult
 
@@ -19,6 +19,7 @@ class RunSummary:
     usage: Usage = field(default_factory=Usage)
     turns_count: int = 0
     tool_calls_count: int = 0
+    tool_call_counts: ToolCallCounts = field(default_factory=ToolCallCounts)
     invalid_tool_calls_count: int = 0
     event_count: int = 0
     output_text: str = ""
@@ -47,6 +48,7 @@ def summarize_kernel_result(
         usage=kernel_result.usage,
         turns_count=kernel_result.turns_count,
         tool_calls_count=kernel_result.tool_calls_count,
+        tool_call_counts=kernel_result.tool_call_counts,
         invalid_tool_calls_count=sum(
             len(turn.invalid_tool_calls) for turn in kernel_result.turn_results
         ),
@@ -63,13 +65,15 @@ def summarize_failed_run(
     *,
     run_id: str,
     error_message: str,
+    status: str = "failed",
+    stop_reason: str | None = None,
     events: Iterable[AgentEvent] | None = None,
     metadata: Mapping[str, Any] | None = None,
 ) -> RunSummary:
     return RunSummary(
         run_id=run_id,
-        status="failed",
-        stop_reason=None,
+        status=status,
+        stop_reason=stop_reason,
         event_count=len(tuple(events or ())),
         error_message=error_message,
         metadata=dict(metadata or {}),

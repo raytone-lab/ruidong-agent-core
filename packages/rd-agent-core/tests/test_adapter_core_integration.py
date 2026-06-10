@@ -115,6 +115,7 @@ class _ToolExecutor:
         return ToolExecutionResult(
             ok=True,
             content=f"file:{request.tool_input['path']}",
+            tool_use_id=request.tool_use_id or "",
             duration_ms=4,
         )
 

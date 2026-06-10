@@ -10,7 +10,7 @@
 
 - `rd-agent-contracts` 定义跨包协议、数据结构和 host ports；
 - `rd-llm-adapter` 把不同 provider 的流式 chunk 归一成标准事件；
-- `rd-agent-core` 执行 turn/run kernel、AgentRunner lifecycle facade、provider LLM client glue、ModelProfile、SubagentRunner、工具调用、事件写入、取消、运行摘要/观测和运行策略；
+- `rd-agent-core` 执行 turn/run kernel、AgentRunner lifecycle facade、ContinuationRunner、provider LLM client glue、ModelProfile、SubagentRunner/SubagentBatchRunner、工具调用、事件写入、取消、运行摘要/观测和运行策略；
 - `rd_agent_core.testing` 提供接入方可复用的本地 harness。
 
 ## 架构分层
@@ -76,6 +76,7 @@ flowchart TD
 - `timeout_ms` / `max_wall_clock`
 - repeated tool call 保护
 - tool allowlist/blocklist 和 mutating tool confirmation
+- tool input schema 校验、超大输出 BlobWriter 分流和 inline output limiter
 - pause tool 停止
 - 协作式 cancellation token
 
@@ -129,7 +130,13 @@ PPT、文档、数据分析、代码执行等业务能力应该实现这些 adap
 - continuation queue job lifecycle；
 - run persistence parent/continuation linkage。
 
-当前 core 提供 `SubagentRunner`，负责 claim 子任务、创建子 run、按 profile 过滤工具、调用 `RunKernel`、构造 outcome 并写回任务终态。更高层的任务拆分、并发策略、队列事务和 UI 投影仍由 host 负责。
+当前 core 提供三层 orchestration helper：
+
+- `AgentRunner`：root run lifecycle facade；
+- `ContinuationRunner`：从 `ContinuationQueuePort` claim continuation job，恢复 `ContinuationState` 并创建下一段 continuation run；
+- `SubagentRunner` / `SubagentBatchRunner`：执行单个子任务，或 batch claim 后 fanout/fanin 聚合子任务 outcome。
+
+更高层的任务拆分、并发策略、队列事务和 UI 投影仍由 host 负责。
 
 ### 8. Model profile
 
@@ -151,9 +158,15 @@ PPT、文档、数据分析、代码执行等业务能力应该实现这些 adap
 
 - `InMemoryEventLog`
 - `InMemoryRunPersistence`
+- `InMemoryContinuationQueue`
 - `ScriptedLLMClient`
 - `FunctionToolExecutor`
 - `AgentCoreHarness`
+- `Scenario`
+- `KernelHarness`
+- `RunnerHarness`
+- `HostHarness`
+- `certification_scenarios`
 - `DeterministicIdGenerator`
 
 接入方可以用 harness 在没有真实数据库、真实 provider 的情况下验证自己的工具、消息和 run 行为。
@@ -309,7 +322,9 @@ else:
 5. 接 `RunKernel`，跑 text-only、single-tool、multi-turn、invalid-tool、max-tool-calls 五条 smoke。
 6. 接 `RunPersistencePort`，落库 stop reason、usage、turn/tool count、engine state。
 7. 跑 `rd_agent_core.conformance`，把 port 语义纳入宿主 CI。
-8. 再接 continuation queue、subagent、UI projection、billing、artifact。
+8. 接 `ContinuationQueuePort` 并用 `ContinuationRunner` / `HostHarness.certify_continuation()` 跑恢复闭环。
+9. 接 `SubagentTaskPort` / `SubagentRunPort`，用 `SubagentRunner` 和 `SubagentBatchRunner` 跑单任务与 fanout/fanin。
+10. 再接 UI projection、billing、artifact 和生产级 observability。
 
 ## 当前发布形态
 

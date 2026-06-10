@@ -90,4 +90,6 @@ def test_smoke_code_for_core_exercises_harness() -> None:
     smoke = module.smoke_code_for(packages["rd-agent-core"])
 
     assert "AgentCoreHarness" in smoke
+    assert "ContinuationRunner" in smoke
+    assert "SubagentBatchRunner" in smoke
     assert "ScriptedLLMClient" in smoke

@@ -9,6 +9,8 @@ from rd_agent_contracts import (
 from rd_agent_core import (
     CoreEventWriter,
     CoreToolPolicy,
+    ToolOutputBlobWriter,
+    ToolOutputLimiter,
     ToolSafetyPolicy,
     TurnKernel,
     TurnRequest,
@@ -34,6 +36,24 @@ def _tool_turn(tool_name: str = "write_file") -> list:
 
 def _ok_tool(_request: ToolExecutionRequest) -> str:
     return "ok"
+
+
+class _FailingObservability:
+    def record_tool_calls(self, _records) -> None:
+        raise RuntimeError("observability down")
+
+
+class _BlobWriter:
+    def __init__(self) -> None:
+        self.writes: list[tuple[bytes, str]] = []
+
+    async def write_large_payload(
+        self,
+        content: bytes,
+        mime_type: str,
+    ) -> tuple[str, str]:
+        self.writes.append((content, mime_type))
+        return ("blob://tool-output/1", "")
 
 
 async def test_tool_safety_blocks_named_tool_before_executor_runs() -> None:
@@ -122,6 +142,137 @@ async def test_tool_safety_executes_confirmed_mutating_tool() -> None:
     assert [request.tool_name for request in executor.requests] == ["write_file"]
 
 
+async def test_tool_safety_fails_closed_when_no_tools_are_declared() -> None:
+    executor = FunctionToolExecutor({"write_file": _ok_tool})
+    kernel = TurnKernel(
+        llm_client=ScriptedLLMClient([_tool_turn()]),
+        event_writer=CoreEventWriter(InMemoryEventLog(), run_id="run-1"),
+        tool_executor=executor,
+    )
+
+    result = await kernel.run_turn(_request(tools=()))
+
+    assert result.tool_results[0].error is not None
+    assert result.tool_results[0].error["type"] == "tool_not_declared"
+    assert executor.requests == []
+
+
+async def test_tool_safety_allows_undeclared_tools_only_when_explicit() -> None:
+    executor = FunctionToolExecutor({"write_file": _ok_tool})
+    kernel = TurnKernel(
+        llm_client=ScriptedLLMClient([_tool_turn()]),
+        event_writer=CoreEventWriter(InMemoryEventLog(), run_id="run-1"),
+        tool_executor=executor,
+        tool_policy=CoreToolPolicy(
+            safety_policy=ToolSafetyPolicy(allow_undeclared_tools=True)
+        ),
+    )
+
+    result = await kernel.run_turn(_request(tools=()))
+
+    assert result.tool_results[0].ok
+    assert [request.tool_name for request in executor.requests] == ["write_file"]
+
+
+async def test_tool_input_validator_blocks_schema_mismatch_before_executor() -> None:
+    tool = ToolUseBlock(id="tool-1", name="write_file", input={})
+    executor = FunctionToolExecutor({"write_file": _ok_tool})
+    kernel = TurnKernel(
+        llm_client=ScriptedLLMClient(
+            [
+                [
+                    TurnDone(
+                        stop_reason="tool_use",
+                        content=[tool],
+                        text_blocks=[],
+                        reasoning_blocks=[],
+                        tool_calls=[tool],
+                        invalid_tool_calls=[],
+                        raw_stop_reason="tool_calls",
+                    )
+                ]
+            ]
+        ),
+        event_writer=CoreEventWriter(InMemoryEventLog(), run_id="run-1"),
+        tool_executor=executor,
+    )
+
+    result = await kernel.run_turn(
+        _request(
+            tools=(
+                ToolDefinition(
+                    name="write_file",
+                    description="Write file",
+                    input_schema={
+                        "type": "object",
+                        "properties": {"path": {"type": "string"}},
+                        "required": ["path"],
+                    },
+                    mutates_workspace=True,
+                ),
+            )
+        )
+    )
+
+    assert result.tool_results[0].error is not None
+    assert result.tool_results[0].error["type"] == "tool_input_invalid"
+    assert executor.requests == []
+
+
+async def test_tool_output_limiter_truncates_tool_content() -> None:
+    kernel = TurnKernel(
+        llm_client=ScriptedLLMClient([_tool_turn()]),
+        event_writer=CoreEventWriter(InMemoryEventLog(), run_id="run-1"),
+        tool_executor=FunctionToolExecutor({"write_file": lambda _request: "abcdef"}),
+        tool_policy=CoreToolPolicy(output_limiter=ToolOutputLimiter(max_content_chars=3)),
+    )
+
+    result = await kernel.run_turn(_request())
+
+    assert result.tool_results[0].content == "abc"
+    assert result.tool_results[0].metadata["output_truncated"] is True
+    assert result.tool_results[0].metadata["original_content_chars"] == 6
+
+
+async def test_tool_output_blob_writer_stores_large_tool_content() -> None:
+    blob_writer = _BlobWriter()
+    kernel = TurnKernel(
+        llm_client=ScriptedLLMClient([_tool_turn()]),
+        event_writer=CoreEventWriter(InMemoryEventLog(), run_id="run-1"),
+        tool_executor=FunctionToolExecutor({"write_file": lambda _request: "abcdef"}),
+        tool_policy=CoreToolPolicy(
+            output_blob_writer=ToolOutputBlobWriter(
+                blob_writer=blob_writer,
+                max_inline_chars=3,
+                mime_type="text/plain",
+            )
+        ),
+    )
+
+    result = await kernel.run_turn(_request())
+
+    assert blob_writer.writes == [(b"abcdef", "text/plain")]
+    assert result.tool_results[0].content == "abc"
+    blob_ref = result.tool_results[0].metadata["blob_ref"]
+    assert blob_ref["content_ref"] == "blob://tool-output/1"
+    assert blob_ref["content_inline"] == "abc"
+    assert blob_ref["content_inline_truncated"] is True
+    assert blob_ref["content_bytes"] == 6
+
+
+async def test_tool_observability_failure_is_fail_safe_by_default() -> None:
+    kernel = TurnKernel(
+        llm_client=ScriptedLLMClient([_tool_turn()]),
+        event_writer=CoreEventWriter(InMemoryEventLog(), run_id="run-1"),
+        tool_executor=FunctionToolExecutor({"write_file": _ok_tool}),
+        tool_observability=_FailingObservability(),
+    )
+
+    result = await kernel.run_turn(_request())
+
+    assert result.tool_results[0].ok
+
+
 def _request(
     *,
     tools: tuple[ToolDefinition, ...] | None = None,
@@ -131,14 +282,17 @@ def _request(
         turn_id="turn-1",
         messages=(),
         tool_context=ToolExecutionContext(project_id="project-1"),
-        tools=tools
-        or (
-            ToolDefinition(
-                name="write_file",
-                description="Write file",
-                input_schema={"type": "object"},
-                mutates_workspace=True,
-            ),
+        tools=(
+            tools
+            if tools is not None
+            else (
+                ToolDefinition(
+                    name="write_file",
+                    description="Write file",
+                    input_schema={"type": "object"},
+                    mutates_workspace=True,
+                ),
+            )
         ),
         turn_index=1,
     )

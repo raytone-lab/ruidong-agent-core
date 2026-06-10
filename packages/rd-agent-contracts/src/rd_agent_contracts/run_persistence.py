@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Protocol, runtime_checkable
 
+from .tool_execution import ToolCallCounts
 from .usage import Usage, normalize_usage
 
 
@@ -29,6 +30,7 @@ class RunStatus(StrEnum):
     RESUMING = "resuming"
     RESUMED = "resumed"
     NEEDS_ATTENTION = "needs_attention"
+    CANCELLED = "cancelled"
     FAILED = "failed"
 
 
@@ -82,8 +84,12 @@ class RunScope:
 class RunResultMetadata:
     usage: Usage = field(default_factory=Usage)
     turns_count: int = 0
-    tool_calls_count: int = 0
+    tool_call_counts: ToolCallCounts = field(default_factory=ToolCallCounts)
     extra: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def tool_calls_count(self) -> int:
+        return self.tool_call_counts.executed
 
     def to_json(self) -> dict[str, Any]:
         payload: dict[str, Any] = dict(self.extra)
@@ -95,7 +101,7 @@ class RunResultMetadata:
                 "cache_read_input_tokens": self.usage.cache_read_input_tokens,
             },
             "turns_count": self.turns_count,
-            "tool_calls_count": self.tool_calls_count,
+            "tool_call_counts": self.tool_call_counts.to_json(),
         })
         return payload
 
@@ -103,11 +109,11 @@ class RunResultMetadata:
     def from_json(cls, raw: Mapping[str, Any] | None) -> RunResultMetadata:
         if raw is None:
             return cls()
-        known_keys = {"usage", "turns_count", "tool_calls_count"}
+        known_keys = {"usage", "turns_count", "tool_call_counts"}
         return cls(
             usage=normalize_usage(raw.get("usage")),
             turns_count=int(raw.get("turns_count", 0) or 0),
-            tool_calls_count=int(raw.get("tool_calls_count", 0) or 0),
+            tool_call_counts=ToolCallCounts.from_json(raw.get("tool_call_counts")),
             extra={key: value for key, value in raw.items() if key not in known_keys},
         )
 
@@ -115,6 +121,7 @@ class RunResultMetadata:
 @dataclass(frozen=True)
 class RunCompletion:
     stop_reason: str
+    status: str = RunStatus.COMPLETED
     metadata: RunResultMetadata = field(default_factory=RunResultMetadata)
     engine_state_json: str | None = None
     completed_at_ms: int | None = None

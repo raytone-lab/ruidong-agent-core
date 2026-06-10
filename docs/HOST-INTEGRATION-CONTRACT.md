@@ -19,12 +19,13 @@
 - `RunPersistencePort`：持久化 run lifecycle，至少覆盖 pending、running、completed、failed、continuable/resuming；
 - 可选 `ToolObservabilityPort`：记录工具执行审计、耗时、错误和脱敏后的输入输出；
 - 可选 `ContinuationQueuePort`：把超时、等待用户或预算耗尽后的 continuation 交给 host 队列。
+- 可选 `BlobWriter`：承接超过 inline 阈值的工具输出或 artifact payload。
 
 ## Host 保留的职责
 
 - 身份、租户、项目权限、workspace lease、文件系统和网络访问控制；
 - tool registry 与 profile 过滤，确保模型只能看到本次 run 允许的工具；
-- tool input 的业务级 schema 校验、路径归一化、危险操作二次确认；
+- tool input 的业务级 schema 校验、路径归一化、危险操作二次确认和 blob 存储生命周期；
 - provider base URL/API key/model profile 管理，以及超时、重试、限流；
 - event 投影到 SSE/WebSocket/UI、billing/metering、artifact 存储；
 - continuation 的事务边界：run 状态、队列任务、会话状态必须由 host 原子化协调；
@@ -45,22 +46,23 @@
 3. 实现 `ToolExecutorPort`，先接只读工具，再接写工具和 pause tool；
 4. 用 `RunKernel` 跑 text-only、single-tool、multi-turn、invalid-tool、max-tool-calls 五条 smoke；
 5. 接入 `RunPersistencePort`，把 `RunKernelResult` 的 stop reason、usage、turn/tool count 和 engine state 落库；
-6. 再接 continuation queue、UI projection、billing 和 artifact pipeline。
+6. 接 `ContinuationQueuePort`，用 `ContinuationRunner` 跑上一段 run 的 engine state 恢复；
+7. 接 `SubagentTaskPort` / `SubagentRunPort`，用 `SubagentRunner` 和 `SubagentBatchRunner` 覆盖单任务与 fanout/fanin；
+8. 再接 UI projection、billing 和 artifact pipeline。
 
 ## Release Gate
 
 发布前至少运行：
 
 ```bash
-uv run pytest
-uv run ruff check .
+uv run python tools/scripts/release_gate.py
 uv build --wheel packages/rd-agent-contracts
 uv build --wheel packages/rd-llm-adapter
 uv build --wheel packages/rd-agent-core
 uv run python tools/scripts/verify_wheel_install.py rd-agent-core --dist-dir dist
 ```
 
-Host 集成侧还必须有一条本地烟测，覆盖 `EventLogPort + RunPersistencePort + RunKernel + ToolExecutorPort` 的完整闭环。仓库内的 `packages/rd-agent-core/tests/test_local_host_smoke.py` 是最小参考实现。
+`release_gate.py` 覆盖 ruff、coverage pytest、coverage report、golden trace 自一致性、`py.typed` typing marker、reference host examples 和 compileall。Host 集成侧还必须有本地烟测，至少覆盖 `EventLogPort + RunPersistencePort + RunKernel + ToolExecutorPort` 的完整闭环；接入 continuation 或 subagent 后，还应把 `HostHarness.certify_continuation()` 和 batch subagent 场景纳入宿主 CI。
 
 ## Harness
 
@@ -68,9 +70,13 @@ Host 集成侧还必须有一条本地烟测，覆盖 `EventLogPort + RunPersist
 
 - `InMemoryEventLog`：带 per-run sequence 与 idempotency 的事件日志；
 - `InMemoryRunPersistence`：覆盖 `RunPersistencePort` 生命周期方法；
+- `InMemoryContinuationQueue`：覆盖 continuation claim、attempt、heartbeat、retry、dead-letter 和 stale reclaim；
 - `ScriptedLLMClient`：用标准事件脚本模拟多轮 LLM；
 - `FunctionToolExecutor`：用 Python callable 注册工具 handler；
-- `AgentCoreHarness`：一键跑 `RunKernel`，并返回 run record、kernel result 与完整事件流。
+- `AgentCoreHarness` / `KernelHarness`：跑 `RunKernel`，并返回 run record、kernel result 与完整事件流；
+- `RunnerHarness`：验证 `AgentRunner` lifecycle；
+- `HostHarness`：组合 port conformance、标准 scenario certification 与 continuation certification；
+- `Scenario` / `certification_scenarios()`：声明式验收场景。
 
 最小用法：
 

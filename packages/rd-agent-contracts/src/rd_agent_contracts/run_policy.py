@@ -12,6 +12,7 @@ TERMINAL_WAIT_REASONS = frozenset({StopReason.ASK_USER.value})
 NEEDS_ATTENTION_STOP_REASONS = frozenset({
     StopReason.MAX_TURNS.value,
     StopReason.MAX_WALL_CLOCK.value,
+    StopReason.ERROR.value,
     StopReason.LOOP_BREAK_NO_PROGRESS.value,
     "timeout_ms",
     "loop_break:max_turns",
@@ -60,6 +61,8 @@ def completion_status_for_stop_reason(
     stop_reason: str | None,
     can_auto_continue: bool,
 ) -> str:
+    if stop_reason == StopReason.CANCELLED.value:
+        return RunStatus.CANCELLED.value
     if is_terminal_wait_stop_reason(stop_reason):
         return RunStatus.WAITING_USER.value
     if can_auto_continue:

@@ -30,11 +30,8 @@ jobs:
       - name: Sync deps (含 dev tools)
         run: uv sync --group dev
 
-      - name: Lint
-        run: uv run ruff check .
-
-      - name: Test
-        run: uv run pytest
+      - name: Release gate
+        run: uv run python tools/scripts/release_gate.py
 
       - name: Build wheels
         run: |

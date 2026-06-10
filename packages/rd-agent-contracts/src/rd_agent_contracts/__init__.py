@@ -135,6 +135,7 @@ from .timeline import (
     TimelineSubagentTask,
 )
 from .tool_execution import (
+    ToolCallCounts,
     ToolDefinition,
     ToolExecutionContext,
     ToolExecutionRequest,
@@ -258,6 +259,7 @@ __all__ = [
     "ToolObservabilityRecord",
     "ToolRegistryPort",
     "ToolCall",
+    "ToolCallCounts",
     "ToolCallStatus",
     "ToolResult",
     "ToolUseBlock",

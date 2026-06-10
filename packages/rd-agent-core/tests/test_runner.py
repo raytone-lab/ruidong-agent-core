@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 from rd_agent_contracts import (
     RunBudget,
@@ -10,7 +12,7 @@ from rd_agent_contracts import (
     ToolExecutionRequest,
     ToolUseBlock,
 )
-from rd_agent_core import AgentRunner, AgentRunnerRequest
+from rd_agent_core import AgentRunner, AgentRunnerRequest, CoreToolPolicy
 from rd_agent_core.testing import (
     DeterministicIdGenerator,
     FunctionToolExecutor,
@@ -61,6 +63,26 @@ def _final_turn(request) -> list:
 
 def _lookup(request: ToolExecutionRequest) -> str:
     return f"lookup:{request.tool_input['id']}"
+
+
+def _ask_user_turn(_request) -> list:
+    tool = ToolUseBlock(id="tool-ask", name="ask_user", input={"question": "Continue?"})
+    return [
+        TurnDone(
+            stop_reason="tool_use",
+            content=[tool],
+            text_blocks=[],
+            reasoning_blocks=[],
+            tool_calls=[tool],
+            invalid_tool_calls=[],
+            raw_stop_reason="tool_calls",
+        ),
+    ]
+
+
+async def _cancelled_turn(_request):
+    raise asyncio.CancelledError()
+    yield  # pragma: no cover
 
 
 class _RunObserver:
@@ -157,3 +179,140 @@ async def test_agent_runner_marks_failed_when_kernel_raises() -> None:
     assert "no scripted LLM turn" in str(failed.error_message)
     assert observer.summaries[0].status == "failed"
     assert "no scripted LLM turn" in str(observer.summaries[0].error_message)
+
+
+async def test_agent_runner_maps_max_turns_to_needs_attention() -> None:
+    persistence = InMemoryRunPersistence()
+    runner = AgentRunner(
+        run_persistence=persistence,
+        event_log=InMemoryEventLog(),
+        llm_client=ScriptedLLMClient([_tool_turn]),
+        tool_executor=FunctionToolExecutor({"lookup": _lookup}),
+        id_generator=DeterministicIdGenerator(),
+    )
+
+    result = await runner.run(
+        AgentRunnerRequest(
+            run_id="run-needs-attention",
+            scope=RunScope(user_request_id="request-1", project_id="project-1"),
+            budget=RunBudget(
+                max_turns=1,
+                max_tool_calls=3,
+                max_wall_clock_s=30,
+                total_timeout_s=60,
+            ),
+            tools=(
+                ToolDefinition(
+                    name="lookup",
+                    description="Lookup by id",
+                    input_schema={"type": "object"},
+                ),
+            ),
+        )
+    )
+
+    assert result.completed.status == RunStatus.NEEDS_ATTENTION
+    assert result.completed.stop_reason == "max_turns"
+
+
+async def test_agent_runner_maps_continuable_when_auto_continue_capacity_exists() -> None:
+    runner = AgentRunner(
+        run_persistence=InMemoryRunPersistence(),
+        event_log=InMemoryEventLog(),
+        llm_client=ScriptedLLMClient([_tool_turn]),
+        tool_executor=FunctionToolExecutor({"lookup": _lookup}),
+        id_generator=DeterministicIdGenerator(),
+    )
+
+    result = await runner.run(
+        AgentRunnerRequest(
+            run_id="run-continuable",
+            scope=RunScope(user_request_id="request-1", project_id="project-1"),
+            budget=RunBudget(
+                max_turns=1,
+                max_tool_calls=3,
+                max_wall_clock_s=30,
+                total_timeout_s=60,
+            ),
+            max_continuations=1,
+            tools=(
+                ToolDefinition(
+                    name="lookup",
+                    description="Lookup by id",
+                    input_schema={"type": "object"},
+                ),
+            ),
+        )
+    )
+
+    assert result.completed.status == RunStatus.CONTINUABLE
+    assert result.completed.stop_reason == "max_turns"
+
+
+async def test_agent_runner_maps_pause_tool_to_waiting_user() -> None:
+    runner = AgentRunner(
+        run_persistence=InMemoryRunPersistence(),
+        event_log=InMemoryEventLog(),
+        llm_client=ScriptedLLMClient([_ask_user_turn]),
+        tool_executor=FunctionToolExecutor({"ask_user": lambda _request: "waiting"}),
+        tool_policy=CoreToolPolicy(
+            pause_tool_names=frozenset({"ask_user"}),
+            pause_stop_reason="ask_user",
+        ),
+        id_generator=DeterministicIdGenerator(),
+    )
+
+    result = await runner.run(
+        AgentRunnerRequest(
+            run_id="run-waiting",
+            scope=RunScope(user_request_id="request-1", project_id="project-1"),
+            budget=RunBudget(
+                max_turns=2,
+                max_tool_calls=2,
+                max_wall_clock_s=30,
+                total_timeout_s=60,
+            ),
+            tools=(
+                ToolDefinition(
+                    name="ask_user",
+                    description="Ask",
+                    input_schema={"type": "object"},
+                ),
+            ),
+        )
+    )
+
+    assert result.completed.status == RunStatus.WAITING_USER
+    assert result.completed.stop_reason == "ask_user"
+
+
+async def test_agent_runner_marks_cancelled_when_task_is_cancelled() -> None:
+    persistence = InMemoryRunPersistence()
+    observer = _RunObserver()
+    runner = AgentRunner(
+        run_persistence=persistence,
+        event_log=InMemoryEventLog(),
+        llm_client=ScriptedLLMClient([_cancelled_turn]),
+        run_observer=observer,
+        id_generator=DeterministicIdGenerator(),
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        await runner.run(
+            AgentRunnerRequest(
+                run_id="run-cancelled",
+                scope=RunScope(user_request_id="request-1", project_id="project-1"),
+                budget=RunBudget(
+                    max_turns=1,
+                    max_tool_calls=1,
+                    max_wall_clock_s=30,
+                    total_timeout_s=60,
+                ),
+            )
+        )
+
+    cancelled = persistence.load_run("run-cancelled")
+    assert cancelled is not None
+    assert cancelled.status == RunStatus.CANCELLED
+    assert cancelled.stop_reason == "cancelled"
+    assert observer.summaries[0].status == "cancelled"

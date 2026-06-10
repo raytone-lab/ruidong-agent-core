@@ -61,7 +61,11 @@ class _Tools:
         ]
 
     def execute_tool(self, request: ToolExecutionRequest) -> ToolExecutionResult:
-        return ToolExecutionResult(ok=True, content=f"ran {request.tool_name}")
+        return ToolExecutionResult(
+            ok=True,
+            content=f"ran {request.tool_name}",
+            tool_use_id=request.tool_use_id or "",
+        )
 
 
 class _ToolObservability:

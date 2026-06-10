@@ -7,7 +7,7 @@
 - `SQLiteEventLog`：SQLite 版 `EventLogPort`，支持 per-run sequence 与 idempotency key；
 - `SQLiteRunPersistence`：SQLite 版 `RunPersistencePort`，支持 root run、subagent run、continuation run、parent linkage 和 lifecycle update；
 - `SQLiteContinuationQueue`：SQLite 版 `ContinuationQueuePort`，展示 claim、attempt、retry、dead-letter 和 stale reclaim 语义；
-- `continuation_worker.py`：基于公开 queue contract 的轻量 worker 示例；
+- `continuation_worker.py`：基于公开 queue contract 的轻量 worker 示例；真实恢复执行可直接使用 `rd_agent_core.ContinuationRunner`；
 - `connect_sqlite_reference_host()`：创建共享 SQLite connection 的 reference host；
 - `demo.py`：用 `RunKernel + ScriptedLLMClient + FunctionToolExecutor` 跑一条 single-tool 多轮闭环。
 
@@ -43,7 +43,7 @@ uv run python -m examples.reference_host.demo
 
 - 这个示例没有做租户隔离；
 - 没有实现 provider 重试、限流或 API key 管理；
-- continuation worker 只展示生命周期骨架，没有生产级并发锁和队列调度；
+- continuation worker 只展示生命周期骨架；生产恢复执行应接 `ContinuationRunner`，并由 host 提供并发锁和队列调度；
 - 没有处理大工具输出的 blob 生命周期；
 - 没有完整的安全策略、PII 脱敏和合规保留。
 

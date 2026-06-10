@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | `rd-agent-contracts` | `1.14.1` | 数据结构、运行合同、host ports、`py.typed` |
 | `rd-llm-adapter` | `1.1.2` | Provider 请求构造、流式 chunk 解析、标准事件、`py.typed` |
-| `rd-agent-core` | `0.1.4` | Turn/Run kernel、AgentRunner、provider LLM client、ModelProfile、SubagentRunner、事件写入、运行策略、取消、运行摘要/观测、conformance、业务 adapter 边界、testing harness |
+| `rd-agent-core` | `0.1.4` | Turn/Run kernel、AgentRunner、ContinuationRunner、provider LLM client、ModelProfile、SubagentRunner、事件写入、运行策略、取消、运行摘要/观测、conformance、业务 adapter 边界、testing harness |
 
 ## rd-agent-core
 
@@ -17,6 +17,10 @@
 - `AgentRunner`
 - `AgentRunnerRequest`
 - `AgentRunnerResult`
+- `ContinuationRunner`
+- `ContinuationRunnerRequest`
+- `ContinuationRunnerResult`
+- `ContinuationState`
 - `RunKernel`
 - `RunRequest`
 - `ModelProfile`
@@ -25,9 +29,15 @@
 - `SubagentRunner`
 - `SubagentRunnerRequest`
 - `SubagentRunnerResult`
+- `SubagentBatchRunner`
+- `SubagentBatchRunnerRequest`
+- `SubagentBatchRunnerResult`
 - `TurnKernel`
 - `TurnRequest`
 - `ToolSafetyPolicy`
+- `ToolInputValidator`
+- `ToolOutputBlobWriter`
+- `ToolOutputLimiter`
 - `CoreErrorCategory`
 - `CoreErrorType`
 
@@ -59,6 +69,36 @@ result = await runner.run(AgentRunnerRequest(...))
 
 `AgentRunnerResult` 包含 `run`、`completed`、`kernel_result`、`events` 和 `summary`。
 
+### `ContinuationRunner`
+
+`ContinuationRunner` 是队列 worker facade：从 `ContinuationQueuePort` claim job，读取上一段 run 的 `engine_state_json`，用 `RunKernel` 从保存的 transcript 和 `turn_offset` 恢复执行，再写入下一段 continuation run 和队列终态。
+
+```python
+runner = ContinuationRunner(
+    continuation_queue=queue,
+    run_persistence=persistence,
+    event_log=event_log,
+    llm_client=llm_client,
+    tool_executor=tool_executor,
+)
+
+result = await runner.run_next(
+    ContinuationRunnerRequest(
+        worker_id="continuation-worker-1",
+        tools=tuple(active_tools),
+        limits=RunLimits(max_turns=4, max_tool_calls=12),
+    )
+)
+```
+
+公开状态：
+
+- `ContinuationState(messages, turn_offset)`：`RunCompletion.engine_state_json` 的 core-owned JSON 结构；
+- `continuation_state_from_kernel_result()`：把 `RunKernelResult.messages` 和本段 turns 转成下一段 engine state；
+- `ContinuationRunnerResult`：包含 queue job、previous run、continuation run、kernel result、events、summary 和 completed job。
+
+如果 `RunPersistencePort.create_continuation_run()` 返回 `None`，runner 会失败并让 queue 按 `complete_failure()` 的策略重试或进 dead letter；不会降级创建 root run。
+
 ### `RunKernel`
 
 多轮 agent run 的核心执行器。
@@ -81,7 +121,7 @@ RunKernel(
 - 调用 `LLMClientPort.stream_turn()`；
 - 调用 `TurnKernel` 执行每个 turn；
 - 将 tool result 回灌成 transcript message；
-- 汇总 usage、turn count、tool count；
+- 汇总 usage、turn count、tool call requested/executed/denied count；
 - 执行 `RunLimits`；
 - 返回 `RunKernelResult`。
 
@@ -133,6 +173,7 @@ RunKernelResult(
     messages: tuple[Message, ...],
     turns_count: int,
     tool_calls_count: int,
+    tool_call_counts: ToolCallCounts,
     usage: Usage,
     turn_results: tuple[TurnKernelResult, ...],
     events: tuple[AgentEvent, ...],
@@ -146,6 +187,8 @@ RunKernelResult(
 - `messages`：追加 assistant/tool message 后的 transcript；
 - `events`：本次 kernel run 写出的事件；
 - `usage`：累计 token usage。
+- `tool_calls_count`：真实进入 executor 的工具调用数；
+- `tool_call_counts`：拆分后的 `requested`、`executed`、`denied` 计数。
 
 ### `TurnKernel`
 
@@ -229,6 +272,7 @@ RunSummary(
     usage: Usage = Usage(),
     turns_count: int = 0,
     tool_calls_count: int = 0,
+    tool_call_counts: ToolCallCounts = ToolCallCounts(),
     invalid_tool_calls_count: int = 0,
     event_count: int = 0,
     output_text: str = "",
@@ -373,15 +417,20 @@ CoreToolPolicy(
     pause_tool_names: frozenset[str] = frozenset(),
     pause_stop_reason: str = "pause_requested",
     safety_policy: ToolSafetyPolicy = ToolSafetyPolicy(),
+    input_validator: ToolInputValidator | None = ToolInputValidator(),
+    output_limiter: ToolOutputLimiter | None = None,
+    output_blob_writer: ToolOutputBlobWriter | None = None,
+    observability_fail_fast: bool = False,
 )
 ```
 
-用于声明哪些工具执行成功后应停止当前 run，例如等待用户确认或外部异步任务。
+用于声明哪些工具执行成功后应停止当前 run，例如等待用户确认或外部异步任务。默认启用 `ToolInputValidator`，并默认吞掉 `ToolObservabilityPort` 写入异常；只有 `observability_fail_fast=True` 时观测失败才会让 turn 失败。
 
 ### `ToolSafetyPolicy`
 
 ```python
 ToolSafetyPolicy(
+    allow_undeclared_tools: bool = False,
     allowed_tool_names: frozenset[str] | None = None,
     blocked_tool_names: frozenset[str] = frozenset(),
     require_confirmation_for_mutating_tools: bool = False,
@@ -389,11 +438,22 @@ ToolSafetyPolicy(
 )
 ```
 
-安全策略在工具 executor 之前执行。可能返回的 `error.type`：
+安全策略在工具 executor 之前执行。默认 fail-closed：`TurnRequest.tools` 中没有声明的工具不会进入 executor；动态工具场景必须显式设置 `allow_undeclared_tools=True`。可能返回的 `error.type`：
 
+- `tool_not_declared`
 - `tool_blocked`
 - `tool_not_allowed`
 - `tool_confirmation_required`
+
+### Tool middleware
+
+```python
+ToolInputValidator(enabled=True)
+ToolOutputBlobWriter(blob_writer: BlobWriter, max_inline_chars: int = 8192, mime_type: str = "text/plain")
+ToolOutputLimiter(max_content_chars: int)
+```
+
+`ToolInputValidator` 对 declared `ToolDefinition.input_schema` 执行轻量 JSON-schema 校验，失败时返回 `tool_input_invalid` 且不调用 executor。`ToolOutputBlobWriter` 在输出超过阈值时调用 host 提供的 `BlobWriter.write_large_payload()`，把 `BlobRef` 写入 result metadata，并保留可配置 inline 前缀。`ToolOutputLimiter` 截断超长 `ToolExecutionResult.content`，并在 metadata 写入 `output_truncated` 和 `original_content_chars`。
 
 ### Provider LLM clients
 
@@ -402,7 +462,7 @@ ToolSafetyPolicy(
 ```python
 ProviderClientConfig(
     model: str,
-    api_key: str,
+    api_key: str,  # repr=False
     base_url: str,
     timeout: float = 60.0,
     max_tokens: int = 4096,
@@ -427,6 +487,8 @@ AnthropicNativeLLMClient(config, adapter=None, transport=None, thinking_budget_t
 - 调用 `rd-llm-adapter` transport；
 - 将 provider chunk 解析为 `StandardEvent`；
 - 异常时优先调用 `finalize_on_error()` 保留 partial output。
+
+`ProviderClientConfig.api_key` 不会出现在 dataclass repr 中，避免调试日志泄露 secret。
 
 ### Business adapter APIs
 
@@ -470,6 +532,36 @@ class BusinessAgentAdapter(
 ## rd_agent_core.testing
 
 Testing harness 面向接入方公开使用。
+
+### Certification harness
+
+```python
+from rd_agent_core.testing import (
+    HostHarness,
+    InMemoryContinuationQueue,
+    RunnerHarness,
+    Scenario,
+)
+
+result = await RunnerHarness().run(Scenario.single_tool())
+result.assert_run_status("completed").assert_stop_reason("end_turn")
+
+host = HostHarness(
+    persistence=InMemoryRunPersistence(),
+    event_log=InMemoryEventLog(),
+    continuation_queue=InMemoryContinuationQueue(),
+)
+await host.assert_port_conformance()
+results = await host.certify()
+continuation = await host.certify_continuation()
+```
+
+- `Scenario`：声明式场景 DSL，内置 `text_only`、`single_tool`、`multi_turn_tool_loop`、`invalid_tool`、`pause`、`cancellation_before_start`、`provider_partial_error`。
+- `KernelHarness`：直接验证 `RunKernel`。
+- `RunnerHarness`：验证 `AgentRunner` lifecycle facade。
+- `HostHarness`：组合 port conformance、标准 scenario certification 与 continuation worker certification。
+- `InMemoryContinuationQueue`：内存版 `ContinuationQueuePort`，覆盖 claim、attempt、heartbeat、retry、dead-letter 和 stale reclaim。
+- `certification_scenarios()`：返回默认认证场景清单。
 
 ### `AgentCoreHarness`
 
@@ -520,6 +612,7 @@ HarnessRunResult(
 - `FunctionToolExecutor(handlers)`：把 Python callable 包装成工具执行器；
 - `InMemoryEventLog`：带 idempotency 的 per-run 事件日志；
 - `InMemoryRunPersistence`：内存版 `RunPersistencePort`；
+- `ManualCancellationToken`：用于测试协作式取消；
 - `DeterministicIdGenerator`：生成稳定 run/turn/message/tool id。
 
 ## rd_agent_core.conformance
@@ -550,7 +643,7 @@ await assert_tool_executor_port_conformance(executor, request=...)
 - `SubagentRunPort.create_run_for_task()`；
 - 按 `SubagentProfile` 过滤工具；
 - 用 `RunKernel` 执行子任务；
-- 根据 stop reason 构造 outcome JSON 并写回 `mark_completed`、`mark_waiting`、`record_failure` 或 `mark_failed`；
+- 根据 stop reason 构造 outcome JSON 并写回 `mark_completed`、`mark_waiting`、`mark_cancelled`、`record_failure` 或 `mark_failed`；
 - 可选 `SubagentWorkspacePort.prepare_workspace()` 和 merge-back；
 - 可选 `RunObserverPort` 输出 `RunSummary`。
 
@@ -559,6 +652,9 @@ await assert_tool_executor_port_conformance(executor, request=...)
 - `SubagentRunner`
 - `SubagentRunnerRequest`
 - `SubagentRunnerResult`
+- `SubagentBatchRunner`
+- `SubagentBatchRunnerRequest`
+- `SubagentBatchRunnerResult`
 
 ```python
 runner = SubagentRunner(
@@ -580,6 +676,26 @@ result = await runner.run_next(
 ```
 
 `SubagentRunnerResult` 包含 claimed task、attempted task、created run、completed task、`RunKernelResult`、events、`RunSummary` 和可选 workspace merge result。
+
+批量 fanout/fanin 使用 `SubagentTaskPort.claim_pending_batch()` 领取同一 `user_request_id` 下的一批 pending task，再逐个交给同一个 `SubagentRunner` 执行。返回结果使用 contracts 的 `build_subagent_aggregate_outcome()` 和 `format_subagent_aggregate()` 聚合，不重新定义 outcome schema。
+
+```python
+batch = SubagentBatchRunner(task_port=subagent_task_port, runner=runner)
+batch_result = await batch.run_batch(
+    SubagentBatchRunnerRequest(
+        user_request_id="request-1",
+        worker_id="subagent-worker-1",
+        max_count=4,
+        runner_request=SubagentRunnerRequest(
+            tools=tuple(all_tools),
+            limits=RunLimits(max_turns=4, max_tool_calls=12),
+        ),
+    )
+)
+aggregate = batch_result.aggregate_outcome
+```
+
+`SubagentBatchRunner` 默认继续处理后续 task；单个 task 失败会由 `SubagentRunner` 写回失败状态，并在 `SubagentBatchRunnerResult.errors` 中记录错误摘要，最终 aggregate status 由子任务终态决定。
 
 ## rd-agent-contracts
 
@@ -639,7 +755,8 @@ ToolExecutionContext(
 )
 
 ToolExecutionRequest(tool_name, tool_input, context, tool_use_id=None, turn=0)
-ToolExecutionResult(ok, content, error=None, duration_ms=None, metadata={})
+ToolExecutionResult(ok, content, tool_use_id, error=None, duration_ms=None, metadata={})
+ToolCallCounts(requested=0, executed=0, denied=0)
 ```
 
 Ports：
@@ -705,7 +822,7 @@ class EventLogPort(Protocol):
 ```python
 RunBudget(max_turns, max_tool_calls, max_wall_clock_s, total_timeout_s)
 RunScope(user_request_id, project_id, session_id=None, parent_run_id=None, subagent_task_id=None, agent_kind="orchestrator", correlation_id=None)
-RunCompletion(stop_reason, metadata=RunResultMetadata(), engine_state_json=None, completed_at_ms=None)
+RunCompletion(stop_reason, status="completed", metadata=RunResultMetadata(), engine_state_json=None, completed_at_ms=None)
 RunFailure(error_message, completed_at_ms=None)
 RunRecord(...)
 ```

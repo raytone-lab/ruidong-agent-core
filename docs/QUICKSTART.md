@@ -71,9 +71,9 @@ assert result.completed.stop_reason == "end_turn"
 assert result.events
 ```
 
-更完整的 single-tool、多轮、idempotency、continuation parent linkage 参考 `packages/rd-agent-core/tests/test_local_host_smoke.py`。
+更完整的 single-tool、多轮、idempotency、continuation parent linkage 参考 `packages/rd-agent-core/tests/test_testing_harness.py` 和 `examples/reference_host/tests/`。
 
-如果需要看接近生产 host 的持久化形态，参考 `examples/reference_host`。它提供 SQLite 版 `EventLogPort` 和 `RunPersistencePort`，并包含一条可运行的 `RunKernel` 闭环 demo。
+如果需要看接近生产 host 的持久化形态，参考 `examples/reference_host`。它提供 SQLite 版 `EventLogPort`、`RunPersistencePort` 和 `ContinuationQueuePort`，并包含一条可运行的 `RunKernel` 闭环 demo。
 
 ## Host 接入顺序
 
@@ -84,19 +84,20 @@ assert result.events
 5. 接 `RunPersistencePort`，把 stop reason、usage、turn/tool count 和 engine state 落库。
 6. 跑 `rd_agent_core.conformance`，把 `EventLogPort`、`RunPersistencePort`、`ToolExecutorPort` 的最低语义纳入宿主 CI。
 7. 用 `ModelProfile` 规范化 provider/model 能力，并用 `ProviderLock` 固定 transcript 协议。
-8. 如需多 agent，接 `SubagentTaskPort` / `SubagentRunPort`，再用 `SubagentRunner` 跑子任务闭环。
-9. 再接 continuation queue、UI projection、billing、artifact pipeline 和生产级 observability。
+8. 接 `ContinuationQueuePort`，用 `ContinuationRunner` 或 `HostHarness.certify_continuation()` 跑 engine state 恢复闭环。
+9. 如需多 agent，接 `SubagentTaskPort` / `SubagentRunPort`，再用 `SubagentRunner` 跑单任务，用 `SubagentBatchRunner` 跑 fanout/fanin 聚合。
+10. 再接 UI projection、billing、artifact pipeline 和生产级 observability。
 
-生产接入可以从 `AgentRunner` 开始。它会按顺序调用 `RunPersistencePort.create_root_run()`、`mark_running()`、`RunKernel.run()`、`mark_completed()` / `mark_failed()`，并返回 `RunSummary` 供 metrics、trace、billing projection 使用。需要更强事务边界时，仍可直接使用 `RunKernel`。
+生产接入可以从 `AgentRunner` 开始。它会按顺序调用 `RunPersistencePort.create_root_run()`、`mark_running()`、`RunKernel.run()`，再按 stop reason 写入 `completed`、`continuable`、`waiting_user`、`needs_attention`、`cancelled` 或 `failed` 状态，并返回 `RunSummary` 供 metrics、trace、billing projection 使用。需要更强事务边界时，仍可直接使用 `RunKernel`。
 
 ## 发布前验证
 
 ```bash
-uv run ruff check .
-uv run pytest
+uv run python tools/scripts/release_gate.py
 uv build --wheel packages/rd-agent-contracts
 uv build --wheel packages/rd-llm-adapter
 uv build --wheel packages/rd-agent-core
+uv run python tools/scripts/verify_wheel_install.py rd-agent-core --dist-dir dist
 ```
 
 推荐 release tag：

@@ -121,8 +121,11 @@ from rd_agent_contracts import TextBlock
 from rd_agent_core import (
     AgentRunner,
     AnthropicNativeLLMClient,
+    ContinuationRunner,
     OpenAICompatLLMClient,
     ProviderClientConfig,
+    SubagentBatchRunner,
+    ToolOutputBlobWriter,
     ToolSafetyPolicy,
 )
 from rd_agent_core.testing import AgentCoreHarness, ScriptedLLMClient
@@ -154,8 +157,11 @@ async def main():
 asyncio.run(main())
 assert AgentRunner
 assert AnthropicNativeLLMClient
+assert ContinuationRunner
 assert OpenAICompatLLMClient
 assert ProviderClientConfig
+assert SubagentBatchRunner
+assert ToolOutputBlobWriter
 assert ToolSafetyPolicy
 """
     if package.name == "rd-agent-contracts":

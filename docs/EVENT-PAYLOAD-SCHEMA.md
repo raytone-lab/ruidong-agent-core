@@ -34,7 +34,7 @@ AgentEvent(
 | `tool_completed` | `tool_name: str`, `tool_use_id: str`, `result: ToolExecutionResult dict` | 工具执行成功。 |
 | `tool_failed` | `tool_name: str`, `tool_use_id: str`, `result: ToolExecutionResult dict` | 工具执行失败、被 policy 拒绝、未声明、executor 缺失或 pause 后跳过。 |
 | `turn_paused` | `tool_name: str`, `tool_use_id: str`, `stop_reason: str` | pause tool 成功执行后写入。 |
-| `turn_completed` | `stop_reason: str`, `raw_stop_reason: str`, `tool_calls_executed: int`, `invalid_tool_calls: int`, `pause_requested: bool`, `terminal_text: str`, `terminal_reasoning: str`, `usage: Usage dict` | turn 终态汇总。 |
+| `turn_completed` | `stop_reason: str`, `raw_stop_reason: str`, `tool_calls_requested: int`, `tool_calls_executed: int`, `tool_calls_denied: int`, `invalid_tool_calls: int`, `pause_requested: bool`, `terminal_text: str`, `terminal_reasoning: str`, `usage: Usage dict` | turn 终态汇总。`executed` 只统计真实进入 executor 的调用。 |
 
 ## ToolExecutionResult Dict
 
@@ -44,16 +44,35 @@ AgentEvent(
 ToolExecutionResult(
     ok: bool,
     content: str,
+    tool_use_id: str,
     error: dict[str, Any] | None = None,
     duration_ms: int | None = None,
     metadata: dict[str, Any] = {},
 )
 ```
 
+`metadata.executed` 标记该结果是否真实进入 executor；policy 拒绝、未声明、executor 缺失、运行限制、取消和 pause 后跳过均为 `False`。
+
+当 host 在 `CoreToolPolicy.output_blob_writer` 中配置 `ToolOutputBlobWriter`，超出 inline 阈值的工具输出会写入 `metadata.blob_ref`：
+
+```python
+{
+    "content_bytes": int,
+    "content_sha256": str,
+    "mime_type": str,
+    "content_inline": str | None,
+    "content_ref": str | None,
+    "content_inline_truncated": bool,
+}
+```
+
+此时 `result.content` 只保留 inline 前缀或空字符串，完整内容由 host 的 blob store 负责读取。
+
 常见 `error.type`：
 
 - `tool_not_declared`
 - `tool_executor_missing`
+- `tool_input_invalid`
 - `tool_blocked`
 - `tool_not_allowed`
 - `tool_confirmation_required`

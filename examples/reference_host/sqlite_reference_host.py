@@ -277,7 +277,7 @@ class SQLiteRunPersistence:
     ) -> RunRecord | None:
         return self._update(
             run_id,
-            status=RunStatus.COMPLETED.value,
+            status=str(completion.status),
             stop_reason=completion.stop_reason,
             result_metadata=completion.metadata,
             engine_state_json=completion.engine_state_json,

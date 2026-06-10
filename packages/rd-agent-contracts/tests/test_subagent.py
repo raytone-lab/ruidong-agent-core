@@ -271,6 +271,27 @@ class _InMemorySubagentTasks:
         self.records[task_id] = updated
         return updated
 
+    def mark_cancelled(
+        self,
+        *,
+        task_id: str,
+        error_message: str | None = None,
+        outcome_json: dict | None = None,
+        completed_at_ms: int | None = None,
+    ) -> SubagentTaskRecord | None:
+        record = self.records.get(task_id)
+        if record is None:
+            return None
+        updated = _replace_record(
+            record,
+            status="cancelled",
+            error_message=error_message,
+            outcome_json=outcome_json,
+            completed_at_ms=completed_at_ms,
+        )
+        self.records[task_id] = updated
+        return updated
+
     def mark_running(self, *, task_id: str) -> SubagentTaskRecord | None:
         record = self.records.get(task_id)
         if record is None:

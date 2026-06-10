@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterable, AsyncIterator, Mapping, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
 from rd_agent_contracts import Message, ToolDefinition, ToolResult
@@ -23,7 +23,7 @@ from .turn import TurnRequest
 @dataclass(frozen=True)
 class ProviderClientConfig:
     model: str
-    api_key: str
+    api_key: str = field(repr=False)
     base_url: str
     timeout: float = 60.0
     max_tokens: int = 4096

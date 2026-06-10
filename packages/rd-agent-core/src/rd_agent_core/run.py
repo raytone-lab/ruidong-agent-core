@@ -15,6 +15,7 @@ from rd_agent_contracts import (
     Message,
     StandardContentBlock,
     ToolCall,
+    ToolCallCounts,
     ToolCallStatus,
     ToolDefinition,
     ToolExecutionContext,
@@ -82,6 +83,7 @@ class RunKernelResult:
     messages: tuple[Message, ...]
     turns_count: int
     tool_calls_count: int
+    tool_call_counts: ToolCallCounts
     usage: Usage
     turn_results: tuple[TurnKernelResult, ...]
     events: tuple[AgentEvent, ...]
@@ -125,7 +127,9 @@ class RunKernel:
         all_events: list[AgentEvent] = []
         all_tool_results: list[ToolExecutionResult] = []
         usage = Usage()
-        tool_calls_count = 0
+        tool_calls_requested_count = 0
+        tool_calls_executed_count = 0
+        tool_calls_denied_count = 0
         stop_reason = "end_turn"
         tool_signatures: list[ToolCallSignature] = []
 
@@ -136,7 +140,7 @@ class RunKernel:
 
             state = RunLimitState(
                 turns_used=len(turn_results),
-                tool_calls_used=tool_calls_count,
+                tool_calls_used=tool_calls_requested_count,
                 elapsed_ms=max(0, int((self._clock() - started_at) * 1000)),
             )
             decision = evaluate_run_limits(request.limits, state)
@@ -150,7 +154,7 @@ class RunKernel:
                 request.limits,
                 tools=request.tools,
                 tool_signatures=tool_signatures,
-                tool_calls_used=tool_calls_count,
+                tool_calls_used=tool_calls_requested_count,
             )
             turn_kernel = TurnKernel(
                 llm_client=self._llm_client,
@@ -178,7 +182,9 @@ class RunKernel:
             turn_results.append(turn_result)
             all_events.extend(turn_result.events)
             all_tool_results.extend(turn_result.tool_results)
-            tool_calls_count += turn_result.tool_calls_executed
+            tool_calls_requested_count += turn_result.tool_calls_requested
+            tool_calls_executed_count += turn_result.tool_calls_executed
+            tool_calls_denied_count += turn_result.tool_calls_denied
             usage = _add_usage(usage, turn_result.usage)
             messages.extend(
                 build_messages_after_turn(
@@ -196,14 +202,20 @@ class RunKernel:
                 break
             if turn_result.stop_reason == CoreErrorType.CANCELLED.value:
                 break
-            if turn_result.pause_requested or turn_result.tool_calls_executed == 0:
+            if turn_result.pause_requested or turn_result.tool_calls_requested == 0:
                 break
 
+        tool_call_counts = ToolCallCounts(
+            requested=tool_calls_requested_count,
+            executed=tool_calls_executed_count,
+            denied=tool_calls_denied_count,
+        )
         return RunKernelResult(
             stop_reason=stop_reason,
             messages=tuple(messages),
             turns_count=len(turn_results),
-            tool_calls_count=tool_calls_count,
+            tool_calls_count=tool_calls_executed_count,
+            tool_call_counts=tool_call_counts,
             usage=usage,
             turn_results=tuple(turn_results),
             events=tuple(all_events),
@@ -263,6 +275,7 @@ class _MaxToolCallsGuard:
             return ToolExecutionResult(
                 ok=False,
                 content="Tool call blocked by run policy: max_tool_calls reached.",
+                tool_use_id=request.tool_use_id or "",
                 error=core_error(
                     CoreErrorType.MAX_TOOL_CALLS.value,
                     "Tool call blocked by run policy: max_tool_calls reached.",
@@ -271,6 +284,7 @@ class _MaxToolCallsGuard:
                         "tool_use_id": request.tool_use_id,
                     },
                 ),
+                metadata={"executed": False},
             )
 
         self._tool_calls_seen += 1
@@ -312,6 +326,7 @@ class _RepeatedToolCallGuard:
             return ToolExecutionResult(
                 ok=False,
                 content="Repeated tool call blocked by run policy.",
+                tool_use_id=request.tool_use_id or "",
                 error=core_error(
                     CoreErrorType.REPEATED_TOOL_CALL.value,
                     "Repeated tool call blocked by run policy.",
@@ -322,6 +337,7 @@ class _RepeatedToolCallGuard:
                         "occurrences": occurrences_including_current,
                     },
                 ),
+                metadata={"executed": False},
             )
 
         self._signatures.append(candidate)
@@ -341,6 +357,14 @@ def build_messages_after_turn(
     tool_calls = tuple(block for block in content if isinstance(block, ToolUseBlock))
     if len(tool_calls) != len(tool_results):
         raise ValueError("tool_results must pair one-to-one with tool_use content blocks")
+    results_by_id: dict[str, ToolExecutionResult] = {}
+    for result in tool_results:
+        if result.tool_use_id in results_by_id:
+            raise ValueError(f"duplicate tool result for tool_use_id: {result.tool_use_id}")
+        results_by_id[result.tool_use_id] = result
+    missing = [block.id for block in tool_calls if block.id not in results_by_id]
+    if missing:
+        raise ValueError(f"missing tool results for tool_use_id: {missing}")
     messages = [
         Message(
             message_id=assistant_message_id,
@@ -359,7 +383,8 @@ def build_messages_after_turn(
         )
     ]
 
-    for tool_call, result in zip(tool_calls, tool_results, strict=True):
+    for tool_call in tool_calls:
+        result = results_by_id[tool_call.id]
         tool_result = ToolResult(
             tool_use_id=tool_call.id,
             ok=result.ok,

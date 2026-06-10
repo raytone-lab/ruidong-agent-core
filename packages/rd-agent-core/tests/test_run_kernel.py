@@ -104,7 +104,11 @@ class _ToolExecutor:
 
     async def execute_tool(self, request: ToolExecutionRequest) -> ToolExecutionResult:
         self.requests.append(request)
-        return ToolExecutionResult(ok=True, content=f"result:{request.tool_name}")
+        return ToolExecutionResult(
+            ok=True,
+            content=f"result:{request.tool_name}",
+            tool_use_id=request.tool_use_id or "",
+        )
 
 
 class _CancellationToken:
@@ -650,7 +654,7 @@ def test_build_messages_after_turn_pairs_tool_results() -> None:
         turn_id="turn-1",
         assistant_message_id="msg-assistant",
         content=(tool_call,),
-        tool_results=(ToolExecutionResult(ok=True, content="ok"),),
+        tool_results=(ToolExecutionResult(ok=True, content="ok", tool_use_id="tool-1"),),
         id_generator=_Ids(),
     )
 

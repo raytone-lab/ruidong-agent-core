@@ -437,6 +437,15 @@ class SubagentTaskPort(Protocol):
         outcome_json: dict[str, Any] | None = None,
     ) -> SubagentTaskRecord | None: ...
 
+    def mark_cancelled(
+        self,
+        *,
+        task_id: str,
+        error_message: str | None = None,
+        outcome_json: dict[str, Any] | None = None,
+        completed_at_ms: int | None = None,
+    ) -> SubagentTaskRecord | None: ...
+
     def mark_running(self, *, task_id: str) -> SubagentTaskRecord | None: ...
 
     def record_failure(

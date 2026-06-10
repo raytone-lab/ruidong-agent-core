@@ -94,7 +94,7 @@ async def run_demo() -> dict[str, Any]:
                 metadata=RunResultMetadata(
                     usage=result.usage,
                     turns_count=result.turns_count,
-                    tool_calls_count=result.tool_calls_count,
+                    tool_call_counts=result.tool_call_counts,
                     extra={"event_count": len(result.events)},
                 ),
             ),

@@ -24,8 +24,10 @@ class CoreErrorType(StrEnum):
     TOOL_BLOCKED = "tool_blocked"
     TOOL_CONFIRMATION_REQUIRED = "tool_confirmation_required"
     TOOL_EXECUTOR_MISSING = "tool_executor_missing"
+    TOOL_INPUT_INVALID = "tool_input_invalid"
     TOOL_NOT_ALLOWED = "tool_not_allowed"
     TOOL_NOT_DECLARED = "tool_not_declared"
+    TOOL_OUTPUT_TRUNCATED = "tool_output_truncated"
     TOOL_SKIPPED_AFTER_PAUSE = "tool_skipped_after_pause"
 
 
@@ -36,8 +38,10 @@ _ERROR_TYPE_CATEGORIES: dict[str, CoreErrorCategory] = {
     CoreErrorType.TOOL_BLOCKED.value: CoreErrorCategory.TOOL_POLICY,
     CoreErrorType.TOOL_CONFIRMATION_REQUIRED.value: CoreErrorCategory.TOOL_POLICY,
     CoreErrorType.TOOL_EXECUTOR_MISSING.value: CoreErrorCategory.TOOL_UNAVAILABLE,
+    CoreErrorType.TOOL_INPUT_INVALID.value: CoreErrorCategory.INVALID_TOOL_CALL,
     CoreErrorType.TOOL_NOT_ALLOWED.value: CoreErrorCategory.TOOL_POLICY,
     CoreErrorType.TOOL_NOT_DECLARED.value: CoreErrorCategory.TOOL_UNAVAILABLE,
+    CoreErrorType.TOOL_OUTPUT_TRUNCATED.value: CoreErrorCategory.TOOL_ERROR,
     CoreErrorType.TOOL_SKIPPED_AFTER_PAUSE.value: CoreErrorCategory.TOOL_POLICY,
 }
 

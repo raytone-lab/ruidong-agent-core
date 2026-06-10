@@ -19,7 +19,5 @@ jobs:
         run: uv python install 3.12
       - name: Sync deps (含 dev tools)
         run: uv sync --group dev
-      - name: Lint
-        run: uv run ruff check .
-      - name: Test
-        run: uv run pytest -v
+      - name: Release gate
+        run: uv run python tools/scripts/release_gate.py

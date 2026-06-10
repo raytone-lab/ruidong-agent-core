@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import replace
 
 import pytest
@@ -14,14 +15,19 @@ from rd_agent_contracts import (
     ToolDefinition,
     ToolExecutionContext,
 )
-from rd_agent_core import SubagentRunner, SubagentRunnerRequest
+from rd_agent_core import (
+    SubagentBatchRunner,
+    SubagentBatchRunnerRequest,
+    SubagentRunner,
+    SubagentRunnerRequest,
+)
 from rd_agent_core.testing import FunctionToolExecutor, InMemoryEventLog, ScriptedLLMClient
 from rd_llm_adapter import TurnDone
 
 
 class _SubagentTaskPort:
-    def __init__(self, task: SubagentTaskRecord) -> None:
-        self.tasks = {task.task_id: task}
+    def __init__(self, *tasks: SubagentTaskRecord) -> None:
+        self.tasks = {task.task_id: task for task in tasks}
         self.failures: list[tuple[str, str]] = []
 
     def create_task(
@@ -53,17 +59,31 @@ class _SubagentTaskPort:
     def load_task(self, task_id: str) -> SubagentTaskRecord | None:
         return self.tasks.get(task_id)
 
-    def claim_next_pending(self, **_kwargs) -> SubagentTaskRecord | None:
+    def claim_next_pending(self, **kwargs) -> SubagentTaskRecord | None:
         for task in self.tasks.values():
+            user_request_id = kwargs.get("user_request_id")
+            if user_request_id is not None and task.user_request_id != user_request_id:
+                continue
             if task.status == SubagentTaskStatus.PENDING:
-                claimed = replace(task, status=SubagentTaskStatus.RUNNING)
+                claimed = replace(
+                    task,
+                    status=SubagentTaskStatus.RUNNING,
+                    worker_id=kwargs.get("worker_id"),
+                    started_at_ms=kwargs.get("started_at_ms"),
+                )
                 self.tasks[task.task_id] = claimed
                 return claimed
         return None
 
-    def claim_pending_batch(self, **_kwargs) -> list[SubagentTaskRecord]:
-        task = self.claim_next_pending()
-        return [task] if task is not None else []
+    def claim_pending_batch(self, **kwargs) -> list[SubagentTaskRecord]:
+        max_count = int(kwargs.get("max_count") or 1)
+        claimed: list[SubagentTaskRecord] = []
+        for _ in range(max_count):
+            task = self.claim_next_pending(**kwargs)
+            if task is None:
+                break
+            claimed.append(task)
+        return claimed
 
     def mark_attempt_started(self, *, task_id: str) -> SubagentTaskRecord | None:
         task = self.tasks.get(task_id)
@@ -135,6 +155,22 @@ class _SubagentTaskPort:
             status=SubagentTaskStatus.WAITING_USER,
             result_summary=result_summary,
             outcome_json=outcome_json,
+        )
+
+    def mark_cancelled(
+        self,
+        *,
+        task_id: str,
+        error_message: str | None = None,
+        outcome_json: dict | None = None,
+        completed_at_ms: int | None = None,
+    ) -> SubagentTaskRecord | None:
+        return self._update(
+            task_id,
+            status=SubagentTaskStatus.CANCELLED,
+            error_message=error_message,
+            outcome_json=outcome_json,
+            completed_at_ms=completed_at_ms,
         )
 
     def mark_running(self, *, task_id: str) -> SubagentTaskRecord | None:
@@ -228,6 +264,11 @@ def _final_turn(_request):
     ]
 
 
+async def _cancelled_turn(_request):
+    raise asyncio.CancelledError()
+    yield  # pragma: no cover
+
+
 async def test_subagent_runner_claims_filters_tools_and_marks_completed() -> None:
     task_port = _SubagentTaskPort(_task("planner"))
     run_port = _SubagentRunPort()
@@ -289,3 +330,85 @@ async def test_subagent_runner_records_failure_when_kernel_raises() -> None:
     assert failed is not None
     assert failed.status == SubagentTaskStatus.FAILED
     assert task_port.failures == [("task-1", "no scripted LLM turn at index 0")]
+
+
+async def test_subagent_runner_marks_cancelled_when_task_is_cancelled() -> None:
+    task_port = _SubagentTaskPort(_task("general"))
+    runner = SubagentRunner(
+        task_port=task_port,
+        run_port=_SubagentRunPort(),
+        event_log=_EventLog(),
+        llm_client=ScriptedLLMClient([_cancelled_turn]),
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        await runner.run_next(SubagentRunnerRequest())
+
+    cancelled = task_port.load_task("task-1")
+    assert cancelled is not None
+    assert cancelled.status == SubagentTaskStatus.CANCELLED
+    assert cancelled.outcome_json is not None
+    assert cancelled.outcome_json["status"] == "cancelled"
+
+
+async def test_subagent_batch_runner_fans_out_and_fans_in_completed_tasks() -> None:
+    first = _task("general")
+    second = replace(_task("general"), task_id="task-2", name="Check docs")
+    task_port = _SubagentTaskPort(first, second)
+    runner = SubagentRunner(
+        task_port=task_port,
+        run_port=_SubagentRunPort(),
+        event_log=_EventLog(),
+        llm_client=ScriptedLLMClient([_final_turn, _final_turn]),
+    )
+    batch = SubagentBatchRunner(task_port=task_port, runner=runner)
+
+    result = await batch.run_batch(
+        SubagentBatchRunnerRequest(
+            user_request_id="request-1",
+            worker_id="worker-batch",
+            max_count=2,
+            runner_request=SubagentRunnerRequest(),
+        )
+    )
+
+    assert [task.task_id for task in result.claimed_tasks] == ["task-1", "task-2"]
+    assert [task.status for task in result.completed_tasks] == [
+        SubagentTaskStatus.COMPLETED,
+        SubagentTaskStatus.COMPLETED,
+    ]
+    assert len(result.results) == 2
+    assert result.errors == ()
+    assert result.aggregate_outcome["kind"] == "subagent_aggregate"
+    assert result.aggregate_outcome["status"] == "completed"
+    assert result.aggregate_outcome["total"] == 2
+    assert "Subagent results:" in result.aggregate_text
+
+
+async def test_subagent_batch_runner_collects_errors_into_failed_aggregate() -> None:
+    first = _task("general")
+    second = replace(_task("general"), task_id="task-2", name="Check docs")
+    task_port = _SubagentTaskPort(first, second)
+    runner = SubagentRunner(
+        task_port=task_port,
+        run_port=_SubagentRunPort(),
+        event_log=_EventLog(),
+        llm_client=ScriptedLLMClient([_final_turn]),
+    )
+    batch = SubagentBatchRunner(task_port=task_port, runner=runner)
+
+    result = await batch.run_batch(
+        SubagentBatchRunnerRequest(
+            user_request_id="request-1",
+            max_count=2,
+            runner_request=SubagentRunnerRequest(),
+        )
+    )
+
+    assert len(result.results) == 1
+    assert len(result.errors) == 1
+    assert result.errors[0].task_id == "task-2"
+    assert result.errors[0].error_type == "RuntimeError"
+    assert result.completed_tasks[1].status == SubagentTaskStatus.FAILED
+    assert result.aggregate_outcome["status"] == "failed"
+    assert result.aggregate_outcome["failed"] == 1
