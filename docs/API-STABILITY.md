@@ -75,6 +75,14 @@
 
 ## 版本策略
 
+## 当前兼容说明
+
+`rd-agent-contracts==1.14.1` 当前开发态引入了更精确的工具结果配对和工具计数：
+
+- `ToolExecutionResult.tool_use_id` 是新语义的工具结果配对主键，但构造默认值保留为空字符串，用于兼容旧 host 的 `ToolExecutionResult(ok=True, content="...")` 写法。
+- `RunResultMetadata` 新增 `tool_call_counts: ToolCallCounts`，`from_json()` 会把旧 metadata 的 `tool_calls_count` 迁移为 `requested=executed=n, denied=0`。
+- 新 host executor 应始终使用 `request.tool_use_id` 填充 `ToolExecutionResult.tool_use_id`；默认空值只是兼容层，不应作为新代码规范。
+
 ### 0.x 阶段
 
 `rd-agent-core` 在 `0.x` 阶段采用以下约定：

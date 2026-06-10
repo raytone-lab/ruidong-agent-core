@@ -57,6 +57,27 @@ def test_result_metadata_json_roundtrip_preserves_extra_fields():
     assert restored.extra == {"provider": "anthropic"}
 
 
+def test_result_metadata_from_json_migrates_legacy_tool_calls_count():
+    metadata = RunResultMetadata.from_json(
+        {
+            "usage": {"input_tokens": 2, "output_tokens": 1},
+            "turns_count": 2,
+            "tool_calls_count": 3,
+            "provider": "legacy",
+        }
+    )
+
+    assert metadata.usage.total() == 3
+    assert metadata.turns_count == 2
+    assert metadata.tool_call_counts == ToolCallCounts(
+        requested=3,
+        executed=3,
+        denied=0,
+    )
+    assert metadata.tool_calls_count == 3
+    assert metadata.extra == {"provider": "legacy"}
+
+
 def test_run_record_carries_host_neutral_scope():
     record = RunRecord(
         run_id="run_1",

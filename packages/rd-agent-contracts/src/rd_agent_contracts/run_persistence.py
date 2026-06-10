@@ -109,11 +109,20 @@ class RunResultMetadata:
     def from_json(cls, raw: Mapping[str, Any] | None) -> RunResultMetadata:
         if raw is None:
             return cls()
-        known_keys = {"usage", "turns_count", "tool_call_counts"}
+        known_keys = {"usage", "turns_count", "tool_call_counts", "tool_calls_count"}
+        if raw.get("tool_call_counts") is not None:
+            tool_call_counts = ToolCallCounts.from_json(raw.get("tool_call_counts"))
+        else:
+            legacy_tool_calls_count = int(raw.get("tool_calls_count", 0) or 0)
+            tool_call_counts = ToolCallCounts(
+                requested=legacy_tool_calls_count,
+                executed=legacy_tool_calls_count,
+                denied=0,
+            )
         return cls(
             usage=normalize_usage(raw.get("usage")),
             turns_count=int(raw.get("turns_count", 0) or 0),
-            tool_call_counts=ToolCallCounts.from_json(raw.get("tool_call_counts")),
+            tool_call_counts=tool_call_counts,
             extra={key: value for key, value in raw.items() if key not in known_keys},
         )
 

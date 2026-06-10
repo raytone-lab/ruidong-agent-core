@@ -112,3 +112,10 @@ def test_tool_ports_runtime_protocol():
             )
         ]
     )
+
+
+def test_tool_execution_result_accepts_legacy_constructor_shape():
+    result = ToolExecutionResult(ok=True, content="legacy-ok")
+
+    assert result.tool_use_id == ""
+    assert result.ok

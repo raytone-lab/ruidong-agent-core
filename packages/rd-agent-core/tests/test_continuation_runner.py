@@ -6,6 +6,7 @@ from rd_agent_contracts import (
     ContinuationJobStatus,
     Message,
     RunBudget,
+    RunCompletion,
     RunScope,
     RunStatus,
     TextBlock,
@@ -40,6 +41,13 @@ class _RunObserver:
 
     def record_run_summary(self, summary) -> None:
         self.summaries.append(summary)
+
+
+class _MarkRunningFailsPersistence(InMemoryRunPersistence):
+    def mark_running(self, run_id: str, *, started_at_ms: int | None = None):
+        if run_id == "run-cont-running-fails":
+            return None
+        return super().mark_running(run_id, started_at_ms=started_at_ms)
 
 
 def _tool() -> ToolDefinition:
@@ -265,6 +273,95 @@ async def test_continuation_runner_marks_failed_and_dead_letters_on_error() -> N
     assert job is not None
     assert job.status == ContinuationJobStatus.DEAD_LETTER
     assert "no scripted LLM turn" in str(job.last_error)
+
+
+async def test_continuation_runner_fails_job_when_engine_state_is_invalid() -> None:
+    persistence = InMemoryRunPersistence()
+    previous = persistence.create_root_run(
+        run_id="run-bad-state",
+        scope=RunScope(
+            user_request_id="request-1",
+            project_id="project-1",
+        ),
+        budget=RunBudget(
+            max_turns=1,
+            max_tool_calls=1,
+            max_wall_clock_s=30,
+            total_timeout_s=60,
+        ),
+        max_continuations=1,
+    )
+    persistence.mark_completed(
+        previous.run_id,
+        completion=RunCompletion(
+            stop_reason="max_turns",
+            status=RunStatus.CONTINUABLE.value,
+            engine_state_json="{bad json",
+        ),
+    )
+    queue = InMemoryContinuationQueue()
+    queue.enqueue_for_run(
+        ContinuationJobSpec(
+            user_request_id="request-1",
+            project_id="project-1",
+            previous_run_id=previous.run_id,
+            next_run_id="run-cont-bad-state",
+            max_attempts=1,
+        ),
+        job_id="job-bad-state",
+    )
+    runner = ContinuationRunner(
+        continuation_queue=queue,
+        run_persistence=persistence,
+        event_log=InMemoryEventLog(),
+        llm_client=ScriptedLLMClient([]),
+    )
+
+    with pytest.raises(ValueError):
+        await runner.run_next(ContinuationRunnerRequest(worker_id="worker-1"))
+
+    job = queue.load_job("job-bad-state")
+    assert job is not None
+    assert job.status == ContinuationJobStatus.DEAD_LETTER
+    assert job.last_error
+    assert persistence.load_run("run-cont-bad-state") is None
+
+
+async def test_continuation_runner_fails_job_and_run_when_mark_running_fails() -> None:
+    persistence = _MarkRunningFailsPersistence()
+    event_log = InMemoryEventLog()
+    root = await _create_continuable_root(
+        persistence=persistence,
+        event_log=event_log,
+    )
+    queue = InMemoryContinuationQueue()
+    queue.enqueue_for_run(
+        ContinuationJobSpec(
+            user_request_id="request-1",
+            project_id="project-1",
+            previous_run_id=root.completed.run_id,
+            next_run_id="run-cont-running-fails",
+            max_attempts=1,
+        ),
+        job_id="job-running-fails",
+    )
+    runner = ContinuationRunner(
+        continuation_queue=queue,
+        run_persistence=persistence,
+        event_log=event_log,
+        llm_client=ScriptedLLMClient([]),
+    )
+
+    with pytest.raises(RuntimeError, match="cannot be marked running"):
+        await runner.run_next(ContinuationRunnerRequest(worker_id="worker-1"))
+
+    failed = persistence.load_run("run-cont-running-fails")
+    job = queue.load_job("job-running-fails")
+    assert failed is not None
+    assert failed.status == RunStatus.FAILED
+    assert "cannot be marked running" in str(failed.error_message)
+    assert job is not None
+    assert job.status == ContinuationJobStatus.DEAD_LETTER
 
 
 def test_in_memory_continuation_queue_heartbeats_and_reclaims_stale_jobs() -> None:

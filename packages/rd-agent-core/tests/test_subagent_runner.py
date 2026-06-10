@@ -225,6 +225,21 @@ class _SubagentRunPort:
         return run
 
 
+class _FailingRunPort:
+    def create_run_for_task(
+        self,
+        task: SubagentTaskRecord,
+        *,
+        session_id: str | None = None,
+    ) -> SubagentRunRecord:
+        raise RuntimeError("run creation failed")
+
+
+class _FailingWorkspacePort:
+    def prepare_workspace(self, _spec):
+        raise RuntimeError("workspace prepare failed")
+
+
 class _EventLog(InMemoryEventLog):
     def append_event(
         self,
@@ -330,6 +345,55 @@ async def test_subagent_runner_records_failure_when_kernel_raises() -> None:
     assert failed is not None
     assert failed.status == SubagentTaskStatus.FAILED
     assert task_port.failures == [("task-1", "no scripted LLM turn at index 0")]
+
+
+async def test_subagent_runner_records_failure_when_run_creation_fails() -> None:
+    task_port = _SubagentTaskPort(_task("general"))
+    runner = SubagentRunner(
+        task_port=task_port,
+        run_port=_FailingRunPort(),
+        event_log=_EventLog(),
+        llm_client=ScriptedLLMClient([_final_turn]),
+    )
+
+    with pytest.raises(RuntimeError, match="run creation failed"):
+        await runner.run_next(SubagentRunnerRequest())
+
+    failed = task_port.load_task("task-1")
+    assert failed is not None
+    assert failed.status == SubagentTaskStatus.FAILED
+    assert failed.attempts == 1
+    assert failed.error_message == "run creation failed"
+    assert task_port.failures == [("task-1", "run creation failed")]
+
+
+async def test_subagent_runner_records_failure_when_workspace_prepare_fails() -> None:
+    task = replace(
+        _task("backend_editor"),
+        write_scope_json={"paths": ["src"]},
+    )
+    task_port = _SubagentTaskPort(task)
+    runner = SubagentRunner(
+        task_port=task_port,
+        run_port=_SubagentRunPort(),
+        event_log=_EventLog(),
+        llm_client=ScriptedLLMClient([_final_turn]),
+        workspace_port=_FailingWorkspacePort(),
+    )
+
+    with pytest.raises(RuntimeError, match="workspace prepare failed"):
+        await runner.run_next(
+            SubagentRunnerRequest(
+                workspace_isolation_enabled=True,
+                inline_parallel_enabled=True,
+            )
+        )
+
+    failed = task_port.load_task("task-1")
+    assert failed is not None
+    assert failed.status == SubagentTaskStatus.FAILED
+    assert failed.error_message == "workspace prepare failed"
+    assert task_port.failures == [("task-1", "workspace prepare failed")]
 
 
 async def test_subagent_runner_marks_cancelled_when_task_is_cancelled() -> None:

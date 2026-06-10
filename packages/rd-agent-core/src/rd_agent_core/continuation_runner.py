@@ -113,28 +113,24 @@ class ContinuationRunner:
             job.job_id,
             heartbeat_at_ms=resolved.heartbeat_at_ms,
         ) or job
-        previous = self._run_persistence.load_run(job.previous_run_id)
-        if previous is None:
-            completed_job = self._queue.complete_failure(
-                job.job_id,
-                error=f"previous run not found: {job.previous_run_id}",
-                retry_available_at_ms=resolved.retry_available_at_ms,
-            )
-            raise RuntimeError(
-                f"previous run not found: {job.previous_run_id}; job={completed_job}"
-            )
-
-        state = ContinuationState.from_json(previous.engine_state_json)
-        run = self._ensure_continuation_run(
-            job=job,
-            previous=previous,
-            state=state,
-        )
-        running = self._run_persistence.mark_running(run.run_id)
-        if running is None:
-            raise RuntimeError(f"continuation run cannot be marked running: {run.run_id}")
-
+        run: RunRecord | None = None
         try:
+            previous = self._run_persistence.load_run(job.previous_run_id)
+            if previous is None:
+                raise RuntimeError(f"previous run not found: {job.previous_run_id}")
+
+            state = ContinuationState.from_json(previous.engine_state_json)
+            run = self._ensure_continuation_run(
+                job=job,
+                previous=previous,
+                state=state,
+            )
+            running = self._run_persistence.mark_running(run.run_id)
+            if running is None:
+                raise RuntimeError(
+                    f"continuation run cannot be marked running: {run.run_id}"
+                )
+
             kernel = RunKernel(
                 llm_client=self._llm_client,
                 event_writer=CoreEventWriter(self._event_log, run_id=run.run_id),
@@ -216,22 +212,27 @@ class ContinuationRunner:
                 summary=summary,
             )
         except asyncio.CancelledError:
-            events = tuple(self._event_log.stream_events(run.run_id))
-            self._run_persistence.mark_completed(
-                run.run_id,
-                completion=RunCompletion(
-                    stop_reason="cancelled",
-                    status=RunStatus.CANCELLED.value,
-                    metadata=RunResultMetadata(),
-                ),
+            events = (
+                tuple(self._event_log.stream_events(run.run_id))
+                if run is not None
+                else ()
             )
+            if run is not None:
+                self._run_persistence.mark_completed(
+                    run.run_id,
+                    completion=RunCompletion(
+                        stop_reason="cancelled",
+                        status=RunStatus.CANCELLED.value,
+                        metadata=RunResultMetadata(),
+                    ),
+                )
             self._queue.complete_failure(
                 job.job_id,
                 error="cancelled",
                 retry_available_at_ms=resolved.retry_available_at_ms,
             )
             summary = summarize_failed_run(
-                run_id=run.run_id,
+                run_id=run.run_id if run is not None else job.next_run_id,
                 status=RunStatus.CANCELLED.value,
                 stop_reason="cancelled",
                 error_message="cancelled",
@@ -240,18 +241,23 @@ class ContinuationRunner:
             await notify_run_observer(self._run_observer, summary)
             raise
         except Exception as exc:
-            events = tuple(self._event_log.stream_events(run.run_id))
-            self._run_persistence.mark_failed(
-                run.run_id,
-                failure=RunFailure(error_message=str(exc)),
+            events = (
+                tuple(self._event_log.stream_events(run.run_id))
+                if run is not None
+                else ()
             )
+            if run is not None:
+                self._run_persistence.mark_failed(
+                    run.run_id,
+                    failure=RunFailure(error_message=str(exc)),
+                )
             self._queue.complete_failure(
                 job.job_id,
                 error=str(exc),
                 retry_available_at_ms=resolved.retry_available_at_ms,
             )
             summary = summarize_failed_run(
-                run_id=run.run_id,
+                run_id=run.run_id if run is not None else job.next_run_id,
                 error_message=str(exc),
                 events=events,
             )
@@ -308,4 +314,3 @@ def _limits_from_budget(budget: RunBudget | None) -> RunLimits:
         max_tool_calls=budget.max_tool_calls,
         timeout_ms=budget.max_wall_clock_s * 1000,
     )
-

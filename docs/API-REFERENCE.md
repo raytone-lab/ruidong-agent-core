@@ -755,9 +755,11 @@ ToolExecutionContext(
 )
 
 ToolExecutionRequest(tool_name, tool_input, context, tool_use_id=None, turn=0)
-ToolExecutionResult(ok, content, tool_use_id, error=None, duration_ms=None, metadata={})
+ToolExecutionResult(ok, content, tool_use_id="", error=None, duration_ms=None, metadata={})
 ToolCallCounts(requested=0, executed=0, denied=0)
 ```
+
+`ToolExecutionResult.tool_use_id` 是新代码的配对主键，core 会在工具结果回灌 transcript 时按该字段匹配 `ToolUseBlock.id`。默认空字符串仅用于兼容旧 host 的简单构造；生产 executor 应始终回填 `request.tool_use_id`。
 
 Ports：
 
@@ -826,6 +828,8 @@ RunCompletion(stop_reason, status="completed", metadata=RunResultMetadata(), eng
 RunFailure(error_message, completed_at_ms=None)
 RunRecord(...)
 ```
+
+`RunResultMetadata.from_json()` 兼容旧 metadata 中的 `tool_calls_count` 字段，会迁移为 `ToolCallCounts(requested=n, executed=n, denied=0)`。新写入统一使用 `tool_call_counts`。
 
 `RunPersistencePort`：
 

@@ -72,7 +72,7 @@ class ToolCallCounts:
 class ToolExecutionResult:
     ok: bool
     content: str
-    tool_use_id: str
+    tool_use_id: str = ""
     error: dict[str, Any] | None = None
     duration_ms: int | None = None
     metadata: dict[str, Any] = field(default_factory=dict)

@@ -166,13 +166,15 @@ class SubagentRunner:
     ) -> SubagentRunnerResult:
         resolved_request = request or SubagentRunnerRequest()
         attempted_task = self._task_port.mark_attempt_started(task_id=task.task_id) or task
-        run = self._run_port.create_run_for_task(
-            attempted_task,
-            session_id=resolved_request.session_id,
-        )
-        workspace = self._prepare_workspace(attempted_task, run, resolved_request)
-
+        run: SubagentRunRecord | None = None
+        workspace: SubagentWorkspaceHandle | None = None
         try:
+            run = self._run_port.create_run_for_task(
+                attempted_task,
+                session_id=resolved_request.session_id,
+            )
+            workspace = self._prepare_workspace(attempted_task, run, resolved_request)
+
             kernel = RunKernel(
                 llm_client=self._llm_client,
                 event_writer=CoreEventWriter(self._event_log, run_id=run.run_id),
@@ -248,9 +250,13 @@ class SubagentRunner:
                 workspace_merge_result=merge_result,
             )
         except asyncio.CancelledError:
-            events = tuple(self._event_log.stream_events(run.run_id))
+            events = (
+                tuple(self._event_log.stream_events(run.run_id))
+                if run is not None
+                else ()
+            )
             summary = summarize_failed_run(
-                run_id=run.run_id,
+                run_id=run.run_id if run is not None else attempted_task.task_id,
                 status="cancelled",
                 stop_reason=CoreErrorType.CANCELLED.value,
                 error_message="cancelled",
@@ -261,9 +267,13 @@ class SubagentRunner:
             await notify_run_observer(self._run_observer, summary)
             raise
         except Exception as exc:
-            events = tuple(self._event_log.stream_events(run.run_id))
+            events = (
+                tuple(self._event_log.stream_events(run.run_id))
+                if run is not None
+                else ()
+            )
             summary = summarize_failed_run(
-                run_id=run.run_id,
+                run_id=run.run_id if run is not None else attempted_task.task_id,
                 error_message=str(exc),
                 events=events,
                 metadata={"subagent_task_id": attempted_task.task_id},
