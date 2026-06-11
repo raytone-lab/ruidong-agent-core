@@ -134,7 +134,8 @@ PPT、文档、数据分析、代码执行等业务能力应该实现这些 adap
 
 - `AgentRunner`：root run lifecycle facade；
 - `ContinuationRunner`：从 `ContinuationQueuePort` claim continuation job，恢复 `ContinuationState` 并创建下一段 continuation run；
-- `SubagentRunner` / `SubagentBatchRunner`：执行单个子任务，或 batch claim 后 fanout/fanin 聚合子任务 outcome。
+- `SubagentRunner`：生产推荐的 single-task worker，负责子任务状态机、workspace merge-before-finalize 和 outcome 写回；
+- `SubagentBatchRunner`：provisional helper，用于顺序执行一批已 claim task 并聚合 outcome，不提供生产级并发 lease / heartbeat / reclaim。
 
 更高层的任务拆分、并发策略、队列事务和 UI 投影仍由 host 负责。
 
@@ -323,7 +324,7 @@ else:
 6. 接 `RunPersistencePort`，落库 stop reason、usage、turn/tool count、engine state。
 7. 跑 `rd_agent_core.conformance`，把 port 语义纳入宿主 CI。
 8. 接 `ContinuationQueuePort` 并用 `ContinuationRunner` / `HostHarness.certify_continuation()` 跑恢复闭环。
-9. 接 `SubagentTaskPort` / `SubagentRunPort`，用 `SubagentRunner` 和 `SubagentBatchRunner` 跑单任务与 fanout/fanin。
+9. 接 `SubagentTaskPort` / `SubagentRunPort`，生产默认用 `SubagentRunner.run_next()` 跑 single-task worker；仅在可接受顺序 helper 语义时使用 `SubagentBatchRunner` 聚合 fanout/fanin。
 10. 再接 UI projection、billing、artifact 和生产级 observability。
 
 ## 当前发布形态

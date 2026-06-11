@@ -643,9 +643,11 @@ await assert_tool_executor_port_conformance(executor, request=...)
 - `SubagentRunPort.create_run_for_task()`；
 - 按 `SubagentProfile` 过滤工具；
 - 用 `RunKernel` 执行子任务；
-- 根据 stop reason 构造 outcome JSON 并写回 `mark_completed`、`mark_waiting`、`mark_cancelled`、`record_failure` 或 `mark_failed`；
 - 可选 `SubagentWorkspacePort.prepare_workspace()` 和 merge-back；
-- 可选 `RunObserverPort` 输出 `RunSummary`。
+- 根据 stop reason、workspace merge 结果构造 outcome JSON，并写回 `mark_completed`、`mark_waiting`、`mark_cancelled`、`record_failure` 或 `mark_failed`；
+- 可选 `RunObserverPort` 输出最终 `RunSummary`。
+
+`SubagentRunner` 的稳定化顺序是：`mark_attempt_started` 成功后才创建 run；`create_run_for_task()`、workspace prepare 和 kernel 执行的异常都会写回 task failure；workspace merge 在 task finalize 之前执行。merge 失败不会先把 task 标成 completed，而是把 `workspace_merge.ok=false` 和 `failure.type="workspace_merge_failed"` 写入 outcome，并将 task 终态写为 `failed`。
 
 公开入口：
 
@@ -675,7 +677,16 @@ result = await runner.run_next(
 )
 ```
 
-`SubagentRunnerResult` 包含 claimed task、attempted task、created run、completed task、`RunKernelResult`、events、`RunSummary` 和可选 workspace merge result。
+`SubagentRunnerResult` 包含 claimed task、attempted task、created run、completed task、`RunKernelResult`、events、与 task 终态一致的 `RunSummary` 和可选 workspace merge result。
+
+subagent outcome JSON 保留旧字段 `tool_calls_count`，并新增结构化字段：
+
+- `task_id` / `run_id`
+- `status` / `stop_reason`
+- `tool_call_counts`：`requested`、`executed`、`denied`
+- `tool_history`：按 `tool_use_id` 配对的工具调用历史；缺失结果会记录 `tool_result_missing`
+- `workspace_merge`：`attempted`、`ok`、`changed_paths`、`generation`、`error`
+- `failure`：任务级失败结构；旧字段 `error` 仍保留为兼容别名
 
 批量 fanout/fanin 使用 `SubagentTaskPort.claim_pending_batch()` 领取同一 `user_request_id` 下的一批 pending task，再逐个交给同一个 `SubagentRunner` 执行。返回结果使用 contracts 的 `build_subagent_aggregate_outcome()` 和 `format_subagent_aggregate()` 聚合，不重新定义 outcome schema。
 
@@ -695,7 +706,7 @@ batch_result = await batch.run_batch(
 aggregate = batch_result.aggregate_outcome
 ```
 
-`SubagentBatchRunner` 默认继续处理后续 task；单个 task 失败会由 `SubagentRunner` 写回失败状态，并在 `SubagentBatchRunnerResult.errors` 中记录错误摘要，最终 aggregate status 由子任务终态决定。
+`SubagentBatchRunner` 是 provisional helper：它一次 claim 多个 task 后顺序执行，不提供独立 heartbeat、未执行 task 自动 release、并发隔离或 worker crash 后的批内恢复保证。生产默认应使用 `SubagentRunner.run_next()` 作为 single-task worker，由 host 队列或 worker pool 负责并发、lease、heartbeat 和 reclaim。`SubagentBatchRunner` 默认继续处理后续 task；单个 task 失败会由 `SubagentRunner` 写回失败状态，并在 `SubagentBatchRunnerResult.errors` 中记录错误摘要，最终 aggregate status 由子任务终态决定。
 
 ## rd-agent-contracts
 

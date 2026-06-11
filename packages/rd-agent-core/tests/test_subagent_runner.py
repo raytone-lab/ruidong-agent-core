@@ -11,9 +11,14 @@ from rd_agent_contracts import (
     SubagentTaskRecord,
     SubagentTaskSpec,
     SubagentTaskStatus,
+    SubagentWorkspaceMergeResult,
     TextBlock,
+    ToolCallCounts,
     ToolDefinition,
     ToolExecutionContext,
+    ToolExecutionResult,
+    ToolUseBlock,
+    Usage,
 )
 from rd_agent_core import (
     SubagentBatchRunner,
@@ -21,7 +26,10 @@ from rd_agent_core import (
     SubagentRunner,
     SubagentRunnerRequest,
 )
+from rd_agent_core.run import RunKernelResult
+from rd_agent_core.subagent_runner import _tool_history_from_kernel_result
 from rd_agent_core.testing import FunctionToolExecutor, InMemoryEventLog, ScriptedLLMClient
+from rd_agent_core.turn import TurnKernelResult
 from rd_llm_adapter import TurnDone
 
 
@@ -240,6 +248,57 @@ class _FailingWorkspacePort:
         raise RuntimeError("workspace prepare failed")
 
 
+class _MarkAttemptStartedNoneTaskPort(_SubagentTaskPort):
+    def mark_attempt_started(self, *, task_id: str) -> SubagentTaskRecord | None:
+        return None
+
+
+class _TrackingWorkspaceHandle:
+    def __init__(
+        self,
+        *,
+        task_port: _SubagentTaskPort,
+        fail: bool = False,
+    ) -> None:
+        self.project_id = "project-1"
+        self.task_id = "task-1"
+        self.run_id = "run-task-1"
+        self.write_scope_paths = ["src"]
+        self.task_port = task_port
+        self.fail = fail
+        self.status_at_merge: str | None = None
+
+    def merge_back(self, *, cleanup: bool = True) -> SubagentWorkspaceMergeResult:
+        task = self.task_port.load_task(self.task_id)
+        self.status_at_merge = task.status if task is not None else None
+        if self.fail:
+            raise RuntimeError("merge conflict")
+        return SubagentWorkspaceMergeResult(
+            changed=True,
+            merged_paths=["src/app.py"],
+            generation=7,
+        )
+
+    def cleanup(self) -> None:
+        return None
+
+
+class _TrackingWorkspacePort:
+    def __init__(self, *, task_port: _SubagentTaskPort, fail: bool = False) -> None:
+        self.handle = _TrackingWorkspaceHandle(task_port=task_port, fail=fail)
+
+    def prepare_workspace(self, _spec) -> _TrackingWorkspaceHandle:
+        return self.handle
+
+
+class _RunSummaryObserver:
+    def __init__(self) -> None:
+        self.summaries = []
+
+    def record_run_summary(self, summary) -> None:
+        self.summaries.append(summary)
+
+
 class _EventLog(InMemoryEventLog):
     def append_event(
         self,
@@ -275,6 +334,21 @@ def _final_turn(_request):
             tool_calls=[],
             invalid_tool_calls=[],
             raw_stop_reason="stop",
+        )
+    ]
+
+
+def _ask_user_turn(_request):
+    text = TextBlock("need input")
+    return [
+        TurnDone(
+            stop_reason="ask_user",
+            content=[text],
+            text_blocks=[text],
+            reasoning_blocks=[],
+            tool_calls=[],
+            invalid_tool_calls=[],
+            raw_stop_reason="ask_user",
         )
     ]
 
@@ -396,6 +470,117 @@ async def test_subagent_runner_records_failure_when_workspace_prepare_fails() ->
     assert task_port.failures == [("task-1", "workspace prepare failed")]
 
 
+async def test_subagent_runner_does_not_continue_when_mark_attempt_started_returns_none() -> None:
+    task_port = _MarkAttemptStartedNoneTaskPort(_task("general"))
+    run_port = _SubagentRunPort()
+    runner = SubagentRunner(
+        task_port=task_port,
+        run_port=run_port,
+        event_log=_EventLog(),
+        llm_client=ScriptedLLMClient([_final_turn]),
+    )
+
+    with pytest.raises(RuntimeError, match="cannot be marked attempt started"):
+        await runner.run_next(SubagentRunnerRequest())
+
+    failed = task_port.load_task("task-1")
+    assert failed is not None
+    assert failed.status == SubagentTaskStatus.FAILED
+    assert failed.attempts == 0
+    assert failed.error_message == (
+        "subagent task cannot be marked attempt started: task-1"
+    )
+    assert run_port.created == []
+
+
+async def test_subagent_runner_merges_workspace_before_marking_completed() -> None:
+    task = replace(
+        _task("backend_editor"),
+        write_scope_json={"paths": ["src"]},
+    )
+    task_port = _SubagentTaskPort(task)
+    workspace_port = _TrackingWorkspacePort(task_port=task_port)
+    runner = SubagentRunner(
+        task_port=task_port,
+        run_port=_SubagentRunPort(),
+        event_log=_EventLog(),
+        llm_client=ScriptedLLMClient([_final_turn]),
+        workspace_port=workspace_port,
+    )
+
+    result = await runner.run_next(
+        SubagentRunnerRequest(
+            workspace_isolation_enabled=True,
+            inline_parallel_enabled=True,
+        )
+    )
+
+    assert result is not None
+    assert workspace_port.handle.status_at_merge == SubagentTaskStatus.RUNNING
+    assert result.completed_task.status == SubagentTaskStatus.COMPLETED
+    assert result.workspace_merge_result == SubagentWorkspaceMergeResult(
+        changed=True,
+        merged_paths=["src/app.py"],
+        generation=7,
+    )
+    assert result.completed_task.outcome_json is not None
+    assert result.completed_task.outcome_json["workspace_merge"] == {
+        "attempted": True,
+        "ok": True,
+        "changed_paths": ["src/app.py"],
+        "generation": 7,
+        "error": None,
+        "skipped_reason": None,
+    }
+
+
+async def test_subagent_runner_marks_failed_when_workspace_merge_fails() -> None:
+    task = replace(
+        _task("backend_editor"),
+        write_scope_json={"paths": ["src"]},
+    )
+    task_port = _SubagentTaskPort(task)
+    workspace_port = _TrackingWorkspacePort(task_port=task_port, fail=True)
+    observer = _RunSummaryObserver()
+    runner = SubagentRunner(
+        task_port=task_port,
+        run_port=_SubagentRunPort(),
+        event_log=_EventLog(),
+        llm_client=ScriptedLLMClient([_final_turn]),
+        workspace_port=workspace_port,
+        run_observer=observer,
+    )
+
+    result = await runner.run_next(
+        SubagentRunnerRequest(
+            workspace_isolation_enabled=True,
+            inline_parallel_enabled=True,
+        )
+    )
+
+    assert result is not None
+    assert workspace_port.handle.status_at_merge == SubagentTaskStatus.RUNNING
+    assert result.completed_task.status == SubagentTaskStatus.FAILED
+    assert result.completed_task.error_message == "Workspace merge failed: merge conflict"
+    assert result.summary.status == "failed"
+    assert observer.summaries[-1].status == "failed"
+    assert result.completed_task.outcome_json is not None
+    assert result.completed_task.outcome_json["status"] == "failed"
+    assert result.completed_task.outcome_json["failure"] == {
+        "type": "workspace_merge_failed",
+        "error_type": "RuntimeError",
+        "message": "merge conflict",
+    }
+    assert result.completed_task.outcome_json["workspace_merge"] == {
+        "attempted": True,
+        "ok": False,
+        "changed_paths": [],
+        "generation": None,
+        "error": {"type": "RuntimeError", "message": "merge conflict"},
+        "skipped_reason": None,
+    }
+
+
 async def test_subagent_runner_marks_cancelled_when_task_is_cancelled() -> None:
     task_port = _SubagentTaskPort(_task("general"))
     runner = SubagentRunner(
@@ -413,6 +598,26 @@ async def test_subagent_runner_marks_cancelled_when_task_is_cancelled() -> None:
     assert cancelled.status == SubagentTaskStatus.CANCELLED
     assert cancelled.outcome_json is not None
     assert cancelled.outcome_json["status"] == "cancelled"
+
+
+async def test_subagent_summary_status_matches_waiting_task_status() -> None:
+    task_port = _SubagentTaskPort(_task("general"))
+    observer = _RunSummaryObserver()
+    runner = SubagentRunner(
+        task_port=task_port,
+        run_port=_SubagentRunPort(),
+        event_log=_EventLog(),
+        llm_client=ScriptedLLMClient([_ask_user_turn]),
+        run_observer=observer,
+    )
+
+    result = await runner.run_next(SubagentRunnerRequest())
+
+    assert result is not None
+    assert result.completed_task.status == SubagentTaskStatus.WAITING_USER
+    assert result.summary.status == "waiting_user"
+    assert result.summary.metadata["subagent_task_status"] == "waiting_user"
+    assert observer.summaries[-1].status == "waiting_user"
 
 
 async def test_subagent_batch_runner_fans_out_and_fans_in_completed_tasks() -> None:
@@ -476,3 +681,105 @@ async def test_subagent_batch_runner_collects_errors_into_failed_aggregate() -> 
     assert result.completed_tasks[1].status == SubagentTaskStatus.FAILED
     assert result.aggregate_outcome["status"] == "failed"
     assert result.aggregate_outcome["failed"] == 1
+
+
+def test_subagent_tool_history_pairs_by_tool_use_id_not_position() -> None:
+    first_call = ToolUseBlock(id="tool-1", name="read_file", input={"path": "a.txt"})
+    second_call = ToolUseBlock(id="tool-2", name="write_file", input={"path": "b.txt"})
+    turn_result = TurnKernelResult(
+        stop_reason="end_turn",
+        raw_stop_reason="stop",
+        content=(first_call, second_call),
+        usage=Usage(),
+        tool_results=(
+            ToolExecutionResult(
+                ok=True,
+                content="second",
+                tool_use_id="tool-2",
+                duration_ms=20,
+            ),
+            ToolExecutionResult(
+                ok=False,
+                content="first",
+                tool_use_id="tool-1",
+                error={"type": "read_failed"},
+                duration_ms=10,
+            ),
+        ),
+        invalid_tool_calls=(),
+        events=(),
+        tool_call_counts=ToolCallCounts(requested=2, executed=2, denied=0),
+    )
+    kernel_result = RunKernelResult(
+        stop_reason="end_turn",
+        messages=(),
+        turns_count=1,
+        tool_calls_count=2,
+        tool_call_counts=ToolCallCounts(requested=2, executed=2, denied=0),
+        usage=Usage(),
+        turn_results=(turn_result,),
+        events=(),
+        tool_results=turn_result.tool_results,
+    )
+
+    history = _tool_history_from_kernel_result(kernel_result)
+
+    assert history == [
+        {
+            "tool_use_id": "tool-1",
+            "tool_name": "read_file",
+            "tool_input": {"path": "a.txt"},
+            "ok": False,
+            "error": {"type": "read_failed"},
+            "duration_ms": 10,
+        },
+        {
+            "tool_use_id": "tool-2",
+            "tool_name": "write_file",
+            "tool_input": {"path": "b.txt"},
+            "ok": True,
+            "error": None,
+            "duration_ms": 20,
+        },
+    ]
+
+
+def test_subagent_tool_history_records_missing_tool_result() -> None:
+    tool_call = ToolUseBlock(id="tool-missing", name="read_file", input={"path": "a"})
+    turn_result = TurnKernelResult(
+        stop_reason="end_turn",
+        raw_stop_reason="stop",
+        content=(tool_call,),
+        usage=Usage(),
+        tool_results=(),
+        invalid_tool_calls=(),
+        events=(),
+        tool_call_counts=ToolCallCounts(requested=1, executed=0, denied=0),
+    )
+    kernel_result = RunKernelResult(
+        stop_reason="end_turn",
+        messages=(),
+        turns_count=1,
+        tool_calls_count=0,
+        tool_call_counts=ToolCallCounts(requested=1, executed=0, denied=0),
+        usage=Usage(),
+        turn_results=(turn_result,),
+        events=(),
+        tool_results=(),
+    )
+
+    history = _tool_history_from_kernel_result(kernel_result)
+
+    assert history == [
+        {
+            "tool_use_id": "tool-missing",
+            "tool_name": "read_file",
+            "tool_input": {"path": "a"},
+            "ok": False,
+            "error": {
+                "type": "tool_result_missing",
+                "message": "Missing tool result for tool-missing",
+            },
+            "duration_ms": None,
+        }
+    ]

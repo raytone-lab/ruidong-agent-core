@@ -61,6 +61,7 @@ class SubagentFinalizeOperation(StrEnum):
 class SubagentToolHistoryEntry:
     tool_name: str
     tool_input: Mapping[str, Any] = field(default_factory=dict)
+    tool_use_id: str | None = None
     ok: bool = True
     error: Mapping[str, Any] | None = None
     duration_ms: int | None = None
@@ -113,6 +114,7 @@ def normalize_subagent_tool_history_entry(raw: Any) -> SubagentToolHistoryEntry:
         raw_error = raw.get("error")
         return SubagentToolHistoryEntry(
             tool_name=str(raw.get("tool_name") or raw.get("name") or ""),
+            tool_use_id=_string_or_none(raw.get("tool_use_id")),
             tool_input=raw_input if isinstance(raw_input, Mapping) else {},
             ok=bool(raw.get("ok", True)),
             error=raw_error if isinstance(raw_error, Mapping) else None,
@@ -122,6 +124,7 @@ def normalize_subagent_tool_history_entry(raw: Any) -> SubagentToolHistoryEntry:
     raw_error = getattr(raw, "error", None)
     return SubagentToolHistoryEntry(
         tool_name=str(getattr(raw, "tool_name", "") or ""),
+        tool_use_id=_string_or_none(getattr(raw, "tool_use_id", None)),
         tool_input=raw_input if isinstance(raw_input, Mapping) else {},
         ok=bool(getattr(raw, "ok", True)),
         error=raw_error if isinstance(raw_error, Mapping) else None,
@@ -169,12 +172,27 @@ def build_subagent_outcome_json(
     turns_count: int,
     summary: str,
     task_status: str,
+    task_id: str | None = None,
+    run_id: str | None = None,
+    tool_call_counts: Any | None = None,
+    workspace_merge: Mapping[str, Any] | None = None,
     agent_profile: str | None = None,
     write_scope_json: Mapping[str, Any] | None = None,
     error_message: str | None = None,
     failure: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     entries = normalize_subagent_tool_history(tool_history)
+    tool_history_json = [
+        {
+            "tool_use_id": entry.tool_use_id,
+            "tool_name": entry.tool_name,
+            "tool_input": dict(entry.tool_input),
+            "ok": entry.ok,
+            "error": dict(entry.error) if entry.error else None,
+            "duration_ms": entry.duration_ms,
+        }
+        for entry in entries
+    ]
     validation_entries = [
         entry
         for entry in entries
@@ -182,13 +200,21 @@ def build_subagent_outcome_json(
         or entry.tool_name.startswith("run_")
     ]
     failed_entries = [entry for entry in entries if not entry.ok]
+    normalized_tool_call_counts = _normalize_tool_call_counts(
+        tool_call_counts,
+        fallback=tool_calls_count,
+    )
+    normalized_failure = dict(failure) if failure else None
     return {
         "schema_version": SUBAGENT_OUTCOME_SCHEMA_VERSION,
+        "task_id": task_id,
+        "run_id": run_id,
         "status": task_status,
         "summary": summary[:4000],
         "stop_reason": stop_reason,
         "agent_profile": agent_profile,
         "write_scope": dict(write_scope_json) if write_scope_json else None,
+        "tool_history": tool_history_json,
         "changed_paths": extract_subagent_changed_paths(entries),
         "validation": {
             "tools": [
@@ -207,12 +233,64 @@ def build_subagent_outcome_json(
         },
         "risks": [],
         "artifacts": [],
-        "error": dict(failure) if failure else None,
+        "error": normalized_failure,
+        "failure": normalized_failure,
         "error_type": _failure_error_type(failure),
         "tool_error_type": first_failed_tool_error_type(failed_entries),
         "error_message": error_message[:1000] if error_message else None,
+        "workspace_merge": _normalize_workspace_merge(workspace_merge),
         "tool_calls_count": tool_calls_count,
+        "tool_call_counts": normalized_tool_call_counts,
         "turns_count": turns_count,
+    }
+
+
+def _normalize_tool_call_counts(
+    value: Any,
+    *,
+    fallback: int,
+) -> dict[str, int]:
+    if hasattr(value, "to_json"):
+        raw = value.to_json()
+    elif isinstance(value, Mapping):
+        raw = value
+    else:
+        raw = {}
+    if raw:
+        executed = _coerce_int(raw.get("executed"))
+        return {
+            "requested": _coerce_int(raw.get("requested")),
+            "executed": executed,
+            "denied": _coerce_int(raw.get("denied")),
+        }
+    return {
+        "requested": fallback,
+        "executed": fallback,
+        "denied": 0,
+    }
+
+
+def _normalize_workspace_merge(value: Mapping[str, Any] | None) -> dict[str, Any]:
+    if value is None:
+        return {
+            "attempted": False,
+            "ok": None,
+            "changed_paths": [],
+            "generation": None,
+            "error": None,
+            "skipped_reason": "not_required",
+        }
+    error = value.get("error")
+    changed_paths = value.get("changed_paths") or value.get("merged_paths") or []
+    if not isinstance(changed_paths, Sequence) or isinstance(changed_paths, (str, bytes)):
+        changed_paths = []
+    return {
+        "attempted": bool(value.get("attempted", False)),
+        "ok": value.get("ok") if isinstance(value.get("ok"), bool) else None,
+        "changed_paths": [str(path) for path in changed_paths],
+        "generation": value.get("generation"),
+        "error": dict(error) if isinstance(error, Mapping) else None,
+        "skipped_reason": _string_or_none(value.get("skipped_reason")),
     }
 
 
@@ -334,6 +412,10 @@ def build_subagent_aggregate_outcome(
         child_risks = _normalize_json_list(outcome.get("risks"))
         child_artifacts = _normalize_json_list(outcome.get("artifacts"))
         child_error = _normalize_child_error(record, outcome)
+        tool_call_counts = _normalize_tool_call_counts(
+            outcome.get("tool_call_counts"),
+            fallback=_coerce_int(outcome.get("tool_calls_count")),
+        )
         if child_error:
             errors.append(
                 {
@@ -376,7 +458,12 @@ def build_subagent_aggregate_outcome(
                 "artifacts": child_artifacts,
                 "error": child_error,
                 "stop_reason": _string_or_none(outcome.get("stop_reason")),
-                "tool_calls_count": _coerce_int(outcome.get("tool_calls_count")),
+                "run_id": _string_or_none(outcome.get("run_id")),
+                "workspace_merge": _normalize_workspace_merge(
+                    _mapping_or_none(outcome.get("workspace_merge"))
+                ),
+                "tool_calls_count": tool_call_counts["executed"],
+                "tool_call_counts": tool_call_counts,
                 "turns_count": _coerce_int(outcome.get("turns_count")),
                 "created_at_ms": record.created_at_ms,
                 "started_at_ms": record.started_at_ms,
@@ -481,6 +568,10 @@ def format_subagent_aggregate(records: Iterable[SubagentTaskRecord]) -> str:
 
 def _mapping_or_empty(value: Any) -> Mapping[str, Any]:
     return value if isinstance(value, Mapping) else {}
+
+
+def _mapping_or_none(value: Any) -> Mapping[str, Any] | None:
+    return value if isinstance(value, Mapping) else None
 
 
 def _unique_strings(value: Any) -> list[str]:

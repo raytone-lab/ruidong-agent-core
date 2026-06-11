@@ -3,6 +3,7 @@ from __future__ import annotations
 from rd_agent_contracts import (
     SubagentFinalizeOperation,
     SubagentTaskRecord,
+    ToolCallCounts,
     adjusted_subagent_stop_reason_for_profile,
     build_subagent_aggregate_outcome,
     build_subagent_instruction_text,
@@ -51,9 +52,17 @@ def test_subagent_outcome_schema_extracts_paths_validation_and_errors():
             },
         ],
         tool_calls_count=2,
+        tool_call_counts=ToolCallCounts(requested=3, executed=2, denied=1),
         turns_count=3,
         summary="stopped",
         task_status="failed",
+        task_id="task-1",
+        run_id="run-task-1",
+        workspace_merge={
+            "attempted": True,
+            "ok": False,
+            "error": {"type": "WorkspaceMergeError", "message": "conflict"},
+        },
         agent_profile="browser_verifier",
         write_scope_json={"paths": ["client"]},
         error_message="tool limit",
@@ -65,7 +74,24 @@ def test_subagent_outcome_schema_extracts_paths_validation_and_errors():
     assert outcome["validation"]["ok"] is False
     assert outcome["validation"]["tools"][0]["name"] == "browser_snapshot"
     assert outcome["error_type"] == "max_tool_calls_reached"
+    assert outcome["failure"]["type"] == "max_tool_calls_reached"
     assert outcome["tool_error_type"] == "is_directory"
+    assert outcome["task_id"] == "task-1"
+    assert outcome["run_id"] == "run-task-1"
+    assert outcome["tool_history"][0]["tool_name"] == "write_file"
+    assert outcome["tool_call_counts"] == {
+        "requested": 3,
+        "executed": 2,
+        "denied": 1,
+    }
+    assert outcome["workspace_merge"] == {
+        "attempted": True,
+        "ok": False,
+        "changed_paths": [],
+        "generation": None,
+        "error": {"type": "WorkspaceMergeError", "message": "conflict"},
+        "skipped_reason": None,
+    }
     assert outcome["turns_count"] == 3
 
 
@@ -179,7 +205,14 @@ def test_subagent_aggregate_outcome_preserves_child_order_and_structured_details
             "risks": [{"level": "low", "message": "CSS only"}],
             "artifacts": [{"path": "client/src/App.tsx"}],
             "stop_reason": "stop",
+            "run_id": "run-task-1",
+            "workspace_merge": {
+                "attempted": True,
+                "ok": True,
+                "changed_paths": ["client/src/App.tsx"],
+            },
             "tool_calls_count": 4,
+            "tool_call_counts": {"requested": 5, "executed": 4, "denied": 1},
             "turns_count": 2,
         },
     )
@@ -225,6 +258,14 @@ def test_subagent_aggregate_outcome_preserves_child_order_and_structured_details
         "task-2",
     ]
     assert aggregate["children"][0]["risks"][0]["level"] == "low"
+    assert aggregate["children"][0]["run_id"] == "run-task-1"
+    assert aggregate["children"][0]["workspace_merge"]["ok"] is True
+    assert aggregate["children"][0]["tool_call_counts"] == {
+        "requested": 5,
+        "executed": 4,
+        "denied": 1,
+    }
+    assert aggregate["children"][0]["tool_calls_count"] == 4
     assert aggregate["children"][1]["error"]["type"] == "browser_error"
     assert aggregate["children"][1]["error"]["tool_error_type"] == "is_directory"
     assert aggregate["errors"][0]["task_id"] == "task-2"

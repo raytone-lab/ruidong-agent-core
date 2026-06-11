@@ -165,10 +165,16 @@ class SubagentRunner:
         request: SubagentRunnerRequest | None = None,
     ) -> SubagentRunnerResult:
         resolved_request = request or SubagentRunnerRequest()
-        attempted_task = self._task_port.mark_attempt_started(task_id=task.task_id) or task
+        attempted_task = task
         run: SubagentRunRecord | None = None
         workspace: SubagentWorkspaceHandle | None = None
         try:
+            marked_task = self._task_port.mark_attempt_started(task_id=task.task_id)
+            if marked_task is None:
+                raise RuntimeError(
+                    f"subagent task cannot be marked attempt started: {task.task_id}"
+                )
+            attempted_task = marked_task
             run = self._run_port.create_run_for_task(
                 attempted_task,
                 session_id=resolved_request.session_id,
@@ -214,28 +220,50 @@ class SubagentRunner:
                 )
             )
             events = tuple(self._event_log.stream_events(run.run_id))
-            summary_status = (
-                "cancelled"
-                if kernel_result.stop_reason == CoreErrorType.CANCELLED.value
-                else "completed"
-            )
             summary = summarize_kernel_result(
                 run_id=run.run_id,
-                status=summary_status,
+                status="running",
                 kernel_result=kernel_result,
                 events=events,
                 metadata={"subagent_task_id": attempted_task.task_id},
             )
+            merge_attempted = self._should_merge_workspace(
+                workspace,
+                kernel_result.stop_reason,
+                resolved_request,
+            )
+            merge_result: SubagentWorkspaceMergeResult | None = None
+            merge_error: Exception | None = None
+            if merge_attempted:
+                try:
+                    merge_result = self._merge_workspace_if_needed(
+                        workspace,
+                        kernel_result.stop_reason,
+                        resolved_request,
+                    )
+                except Exception as exc:
+                    merge_error = exc
             completed_task = self._finalize_task(
                 attempted_task,
                 kernel_result,
                 summary,
                 resolved_request,
+                run_id=run.run_id,
+                merge_attempted=merge_attempted,
+                merge_result=merge_result,
+                merge_error=merge_error,
             )
-            merge_result = self._merge_workspace_if_needed(
-                workspace,
-                kernel_result.stop_reason,
-                resolved_request,
+            summary = summarize_kernel_result(
+                run_id=run.run_id,
+                status=str(completed_task.status),
+                kernel_result=kernel_result,
+                events=events,
+                error_message=completed_task.error_message,
+                metadata={
+                    "subagent_task_id": completed_task.task_id,
+                    "subagent_task_status": str(completed_task.status),
+                    "subagent_profile": completed_task.agent_profile,
+                },
             )
             await notify_run_observer(self._run_observer, summary)
             return SubagentRunnerResult(
@@ -263,7 +291,10 @@ class SubagentRunner:
                 events=events,
                 metadata={"subagent_task_id": attempted_task.task_id},
             )
-            self._record_task_cancelled(attempted_task)
+            self._record_task_cancelled(
+                attempted_task,
+                run_id=run.run_id if run is not None else None,
+            )
             await notify_run_observer(self._run_observer, summary)
             raise
         except Exception as exc:
@@ -281,6 +312,7 @@ class SubagentRunner:
             self._record_task_failure(
                 attempted_task,
                 exc,
+                run_id=run.run_id if run is not None else None,
                 delay_seconds=resolved_request.failure_retry_delay_seconds,
             )
             await notify_run_observer(self._run_observer, summary)
@@ -365,23 +397,67 @@ class SubagentRunner:
         kernel_result: RunKernelResult,
         summary: RunSummary,
         request: SubagentRunnerRequest,
+        *,
+        run_id: str | None,
+        merge_attempted: bool,
+        merge_result: SubagentWorkspaceMergeResult | None,
+        merge_error: Exception | None,
     ) -> SubagentTaskRecord:
+        workspace_merge = _workspace_merge_outcome(
+            attempted=merge_attempted,
+            result=merge_result,
+            error=merge_error,
+        )
         if kernel_result.stop_reason == CoreErrorType.CANCELLED.value:
+            failure = {"type": "CancelledError", "message": "cancelled"}
+            if merge_error is not None:
+                failure = _workspace_merge_failure(merge_error)
             outcome = build_subagent_outcome_json(
                 stop_reason=kernel_result.stop_reason,
                 tool_history=_tool_history_from_kernel_result(kernel_result),
                 tool_calls_count=kernel_result.tool_calls_count,
+                tool_call_counts=kernel_result.tool_call_counts,
                 turns_count=kernel_result.turns_count,
                 summary="cancelled",
                 task_status=SubagentTaskStatus.CANCELLED.value,
+                task_id=task.task_id,
+                run_id=run_id,
+                workspace_merge=workspace_merge,
                 agent_profile=task.agent_profile,
                 write_scope_json=task.write_scope_json,
                 error_message="cancelled",
-                failure={"type": "CancelledError", "message": "cancelled"},
+                failure=failure,
             )
             completed = self._task_port.mark_cancelled(
                 task_id=task.task_id,
                 error_message="cancelled",
+                outcome_json=outcome,
+            )
+            if completed is None:
+                raise RuntimeError(f"subagent task disappeared: {task.task_id}")
+            return completed
+
+        if merge_error is not None:
+            error_message = f"Workspace merge failed: {merge_error}"
+            outcome = build_subagent_outcome_json(
+                stop_reason=kernel_result.stop_reason,
+                tool_history=_tool_history_from_kernel_result(kernel_result),
+                tool_calls_count=kernel_result.tool_calls_count,
+                tool_call_counts=kernel_result.tool_call_counts,
+                turns_count=kernel_result.turns_count,
+                summary=summary.output_text or error_message,
+                task_status=SubagentTaskStatus.FAILED.value,
+                task_id=task.task_id,
+                run_id=run_id,
+                workspace_merge=workspace_merge,
+                agent_profile=task.agent_profile,
+                write_scope_json=task.write_scope_json,
+                error_message=error_message,
+                failure=_workspace_merge_failure(merge_error),
+            )
+            completed = self._task_port.mark_failed(
+                task_id=task.task_id,
+                error_message=error_message,
                 outcome_json=outcome,
             )
             if completed is None:
@@ -404,9 +480,13 @@ class SubagentRunner:
             stop_reason=kernel_result.stop_reason,
             tool_history=_tool_history_from_kernel_result(kernel_result),
             tool_calls_count=kernel_result.tool_calls_count,
+            tool_call_counts=kernel_result.tool_call_counts,
             turns_count=kernel_result.turns_count,
             summary=result_summary,
             task_status=decision.task_status,
+            task_id=task.task_id,
+            run_id=run_id,
+            workspace_merge=workspace_merge,
             agent_profile=task.agent_profile,
             write_scope_json=task.write_scope_json,
             error_message=decision.error_message,
@@ -447,6 +527,7 @@ class SubagentRunner:
         task: SubagentTaskRecord,
         exc: Exception,
         *,
+        run_id: str | None = None,
         delay_seconds: int | None = None,
     ) -> SubagentTaskRecord | None:
         outcome = build_subagent_outcome_json(
@@ -456,6 +537,8 @@ class SubagentRunner:
             turns_count=0,
             summary=str(exc),
             task_status=SubagentTaskStatus.FAILED.value,
+            task_id=task.task_id,
+            run_id=run_id,
             agent_profile=task.agent_profile,
             write_scope_json=task.write_scope_json,
             error_message=str(exc),
@@ -478,6 +561,8 @@ class SubagentRunner:
     def _record_task_cancelled(
         self,
         task: SubagentTaskRecord,
+        *,
+        run_id: str | None = None,
     ) -> SubagentTaskRecord | None:
         outcome = build_subagent_outcome_json(
             stop_reason=CoreErrorType.CANCELLED.value,
@@ -486,6 +571,8 @@ class SubagentRunner:
             turns_count=0,
             summary="cancelled",
             task_status=SubagentTaskStatus.CANCELLED.value,
+            task_id=task.task_id,
+            run_id=run_id,
             agent_profile=task.agent_profile,
             write_scope_json=task.write_scope_json,
             error_message="cancelled",
@@ -503,20 +590,34 @@ class SubagentRunner:
         stop_reason: str | None,
         request: SubagentRunnerRequest,
     ) -> SubagentWorkspaceMergeResult | None:
-        if workspace is None:
+        if not self._should_merge_workspace(workspace, stop_reason, request):
             return None
+        assert workspace is not None
+        return workspace.merge_back(cleanup=True)
+
+    def _should_merge_workspace(
+        self,
+        workspace: SubagentWorkspaceHandle | None,
+        stop_reason: str | None,
+        request: SubagentRunnerRequest,
+    ) -> bool:
+        if workspace is None:
+            return False
         needs_attention = needs_attention_for_stop_reason(stop_reason)
-        if not should_merge_subagent_workspace(
+        return should_merge_subagent_workspace(
             will_queue_continuation=False,
             needs_attention=needs_attention,
             retryable_needs_attention=request.retryable_needs_attention,
-        ):
-            return None
-        return workspace.merge_back(cleanup=True)
+        )
 
 
 class SubagentBatchRunner:
-    """Fan out claimed subagent tasks and fan in their structured outcomes."""
+    """Provisional sequential batch helper for aggregating subagent outcomes.
+
+    Production hosts should prefer single-task workers around
+    ``SubagentRunner.run_next()`` and implement lease, heartbeat, reclaim, and
+    concurrency in the host queue.
+    """
 
     def __init__(
         self,
@@ -573,17 +674,82 @@ class SubagentBatchRunner:
         )
 
 
+def _workspace_merge_outcome(
+    *,
+    attempted: bool,
+    result: SubagentWorkspaceMergeResult | None,
+    error: Exception | None,
+) -> dict[str, Any]:
+    if error is not None:
+        return {
+            "attempted": attempted,
+            "ok": False,
+            "changed_paths": [],
+            "generation": None,
+            "error": {
+                "type": error.__class__.__name__,
+                "message": str(error),
+            },
+        }
+    if result is not None:
+        return {
+            "attempted": attempted,
+            "ok": True,
+            "changed_paths": list(result.merged_paths),
+            "generation": result.generation,
+            "error": None,
+        }
+    return {
+        "attempted": attempted,
+        "ok": None,
+        "changed_paths": [],
+        "generation": None,
+        "error": None,
+        "skipped_reason": None if attempted else "not_required",
+    }
+
+
+def _workspace_merge_failure(error: Exception) -> dict[str, str]:
+    return {
+        "type": "workspace_merge_failed",
+        "error_type": error.__class__.__name__,
+        "message": str(error),
+    }
+
+
 def _tool_history_from_kernel_result(
     kernel_result: RunKernelResult,
 ) -> list[dict[str, Any]]:
     history: list[dict[str, Any]] = []
     for turn_result in kernel_result.turn_results:
+        results_by_id = {
+            result.tool_use_id: result
+            for result in turn_result.tool_results
+            if result.tool_use_id
+        }
         tool_calls = [
             block for block in turn_result.content if isinstance(block, ToolUseBlock)
         ]
-        for tool_call, result in zip(tool_calls, turn_result.tool_results, strict=False):
+        for tool_call in tool_calls:
+            result = results_by_id.get(tool_call.id)
+            if result is None:
+                history.append(
+                    {
+                        "tool_use_id": tool_call.id,
+                        "tool_name": tool_call.name,
+                        "tool_input": dict(tool_call.input),
+                        "ok": False,
+                        "error": {
+                            "type": "tool_result_missing",
+                            "message": f"Missing tool result for {tool_call.id}",
+                        },
+                        "duration_ms": None,
+                    }
+                )
+                continue
             history.append(
                 {
+                    "tool_use_id": tool_call.id,
                     "tool_name": tool_call.name,
                     "tool_input": dict(tool_call.input),
                     "ok": result.ok,

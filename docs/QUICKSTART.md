@@ -85,7 +85,7 @@ assert result.events
 6. 跑 `rd_agent_core.conformance`，把 `EventLogPort`、`RunPersistencePort`、`ToolExecutorPort` 的最低语义纳入宿主 CI。
 7. 用 `ModelProfile` 规范化 provider/model 能力，并用 `ProviderLock` 固定 transcript 协议。
 8. 接 `ContinuationQueuePort`，用 `ContinuationRunner` 或 `HostHarness.certify_continuation()` 跑 engine state 恢复闭环。
-9. 如需多 agent，接 `SubagentTaskPort` / `SubagentRunPort`，再用 `SubagentRunner` 跑单任务，用 `SubagentBatchRunner` 跑 fanout/fanin 聚合。
+9. 如需多 agent，接 `SubagentTaskPort` / `SubagentRunPort`，生产默认用 `SubagentRunner.run_next()` 跑 single-task worker；`SubagentBatchRunner` 仅作为顺序 batch helper 做 fanout/fanin 聚合。
 10. 再接 UI projection、billing、artifact pipeline 和生产级 observability。
 
 生产接入可以从 `AgentRunner` 开始。它会按顺序调用 `RunPersistencePort.create_root_run()`、`mark_running()`、`RunKernel.run()`，再按 stop reason 写入 `completed`、`continuable`、`waiting_user`、`needs_attention`、`cancelled` 或 `failed` 状态，并返回 `RunSummary` 供 metrics、trace、billing projection 使用。需要更强事务边界时，仍可直接使用 `RunKernel`。

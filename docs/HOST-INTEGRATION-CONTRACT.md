@@ -47,7 +47,7 @@
 4. 用 `RunKernel` 跑 text-only、single-tool、multi-turn、invalid-tool、max-tool-calls 五条 smoke；
 5. 接入 `RunPersistencePort`，把 `RunKernelResult` 的 stop reason、usage、turn/tool count 和 engine state 落库；
 6. 接 `ContinuationQueuePort`，用 `ContinuationRunner` 跑上一段 run 的 engine state 恢复；
-7. 接 `SubagentTaskPort` / `SubagentRunPort`，用 `SubagentRunner` 和 `SubagentBatchRunner` 覆盖单任务与 fanout/fanin；
+7. 接 `SubagentTaskPort` / `SubagentRunPort`，生产默认用 `SubagentRunner.run_next()` 覆盖 single-task worker；`SubagentBatchRunner` 只作为顺序 batch helper 覆盖 fanout/fanin 聚合；
 8. 再接 UI projection、billing 和 artifact pipeline。
 
 ## Release Gate
