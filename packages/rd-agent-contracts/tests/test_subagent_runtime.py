@@ -90,6 +90,8 @@ def test_subagent_outcome_schema_extracts_paths_validation_and_errors():
         "changed_paths": [],
         "generation": None,
         "error": {"type": "WorkspaceMergeError", "message": "conflict"},
+        "cleanup_ok": None,
+        "cleanup_error": None,
         "skipped_reason": None,
     }
     assert outcome["turns_count"] == 3

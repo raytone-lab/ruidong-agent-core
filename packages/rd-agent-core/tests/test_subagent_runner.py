@@ -27,7 +27,11 @@ from rd_agent_core import (
     SubagentRunnerRequest,
 )
 from rd_agent_core.run import RunKernelResult
-from rd_agent_core.subagent_runner import _tool_history_from_kernel_result
+from rd_agent_core.subagent_runner import (
+    SubagentTaskClaimLostError,
+    SubagentTaskLostError,
+    _tool_history_from_kernel_result,
+)
 from rd_agent_core.testing import FunctionToolExecutor, InMemoryEventLog, ScriptedLLMClient
 from rd_agent_core.turn import TurnKernelResult
 from rd_llm_adapter import TurnDone
@@ -253,12 +257,30 @@ class _MarkAttemptStartedNoneTaskPort(_SubagentTaskPort):
         return None
 
 
+class _TaskDisappearsBeforeAttemptPort(_MarkAttemptStartedNoneTaskPort):
+    def load_task(self, task_id: str) -> SubagentTaskRecord | None:
+        return None
+
+
+class _FinalizeReturnsNoneTaskPort(_SubagentTaskPort):
+    def mark_completed(
+        self,
+        *,
+        task_id: str,
+        result_summary: str | None = None,
+        outcome_json: dict | None = None,
+        completed_at_ms: int | None = None,
+    ) -> SubagentTaskRecord | None:
+        return None
+
+
 class _TrackingWorkspaceHandle:
     def __init__(
         self,
         *,
         task_port: _SubagentTaskPort,
         fail: bool = False,
+        cleanup_fail: bool = False,
     ) -> None:
         self.project_id = "project-1"
         self.task_id = "task-1"
@@ -266,7 +288,9 @@ class _TrackingWorkspaceHandle:
         self.write_scope_paths = ["src"]
         self.task_port = task_port
         self.fail = fail
+        self.cleanup_fail = cleanup_fail
         self.status_at_merge: str | None = None
+        self.cleanup_calls = 0
 
     def merge_back(self, *, cleanup: bool = True) -> SubagentWorkspaceMergeResult:
         task = self.task_port.load_task(self.task_id)
@@ -280,12 +304,25 @@ class _TrackingWorkspaceHandle:
         )
 
     def cleanup(self) -> None:
+        self.cleanup_calls += 1
+        if self.cleanup_fail:
+            raise RuntimeError("cleanup failed")
         return None
 
 
 class _TrackingWorkspacePort:
-    def __init__(self, *, task_port: _SubagentTaskPort, fail: bool = False) -> None:
-        self.handle = _TrackingWorkspaceHandle(task_port=task_port, fail=fail)
+    def __init__(
+        self,
+        *,
+        task_port: _SubagentTaskPort,
+        fail: bool = False,
+        cleanup_fail: bool = False,
+    ) -> None:
+        self.handle = _TrackingWorkspaceHandle(
+            task_port=task_port,
+            fail=fail,
+            cleanup_fail=cleanup_fail,
+        )
 
     def prepare_workspace(self, _spec) -> _TrackingWorkspaceHandle:
         return self.handle
@@ -470,7 +507,7 @@ async def test_subagent_runner_records_failure_when_workspace_prepare_fails() ->
     assert task_port.failures == [("task-1", "workspace prepare failed")]
 
 
-async def test_subagent_runner_does_not_continue_when_mark_attempt_started_returns_none() -> None:
+async def test_subagent_runner_does_not_record_failure_when_attempt_claim_lost() -> None:
     task_port = _MarkAttemptStartedNoneTaskPort(_task("general"))
     run_port = _SubagentRunPort()
     runner = SubagentRunner(
@@ -480,16 +517,32 @@ async def test_subagent_runner_does_not_continue_when_mark_attempt_started_retur
         llm_client=ScriptedLLMClient([_final_turn]),
     )
 
-    with pytest.raises(RuntimeError, match="cannot be marked attempt started"):
+    with pytest.raises(SubagentTaskClaimLostError, match="status=running"):
         await runner.run_next(SubagentRunnerRequest())
 
-    failed = task_port.load_task("task-1")
-    assert failed is not None
-    assert failed.status == SubagentTaskStatus.FAILED
-    assert failed.attempts == 0
-    assert failed.error_message == (
-        "subagent task cannot be marked attempt started: task-1"
+    task = task_port.load_task("task-1")
+    assert task is not None
+    assert task.status == SubagentTaskStatus.RUNNING
+    assert task.attempts == 0
+    assert task.error_message is None
+    assert task_port.failures == []
+    assert run_port.created == []
+
+
+async def test_subagent_runner_does_not_record_failure_when_task_disappears() -> None:
+    task_port = _TaskDisappearsBeforeAttemptPort(_task("general"))
+    run_port = _SubagentRunPort()
+    runner = SubagentRunner(
+        task_port=task_port,
+        run_port=run_port,
+        event_log=_EventLog(),
+        llm_client=ScriptedLLMClient([_final_turn]),
     )
+
+    with pytest.raises(SubagentTaskLostError, match="disappeared before attempt"):
+        await runner.run_next(SubagentRunnerRequest())
+
+    assert task_port.failures == []
     assert run_port.created == []
 
 
@@ -530,6 +583,8 @@ async def test_subagent_runner_merges_workspace_before_marking_completed() -> No
         "changed_paths": ["src/app.py"],
         "generation": 7,
         "error": None,
+        "cleanup_ok": True,
+        "cleanup_error": None,
         "skipped_reason": None,
     }
 
@@ -560,6 +615,7 @@ async def test_subagent_runner_marks_failed_when_workspace_merge_fails() -> None
 
     assert result is not None
     assert workspace_port.handle.status_at_merge == SubagentTaskStatus.RUNNING
+    assert workspace_port.handle.cleanup_calls == 1
     assert result.completed_task.status == SubagentTaskStatus.FAILED
     assert result.completed_task.error_message == "Workspace merge failed: merge conflict"
     assert result.summary.status == "failed"
@@ -577,6 +633,94 @@ async def test_subagent_runner_marks_failed_when_workspace_merge_fails() -> None
         "changed_paths": [],
         "generation": None,
         "error": {"type": "RuntimeError", "message": "merge conflict"},
+        "cleanup_ok": True,
+        "cleanup_error": None,
+        "skipped_reason": None,
+    }
+
+
+async def test_subagent_runner_records_cleanup_error_when_merge_cleanup_fails() -> None:
+    task = replace(
+        _task("backend_editor"),
+        write_scope_json={"paths": ["src"]},
+    )
+    task_port = _SubagentTaskPort(task)
+    workspace_port = _TrackingWorkspacePort(
+        task_port=task_port,
+        fail=True,
+        cleanup_fail=True,
+    )
+    runner = SubagentRunner(
+        task_port=task_port,
+        run_port=_SubagentRunPort(),
+        event_log=_EventLog(),
+        llm_client=ScriptedLLMClient([_final_turn]),
+        workspace_port=workspace_port,
+    )
+
+    result = await runner.run_next(
+        SubagentRunnerRequest(
+            workspace_isolation_enabled=True,
+            inline_parallel_enabled=True,
+        )
+    )
+
+    assert result is not None
+    assert workspace_port.handle.cleanup_calls == 1
+    assert result.completed_task.status == SubagentTaskStatus.FAILED
+    assert result.completed_task.outcome_json is not None
+    assert result.completed_task.outcome_json["workspace_merge"] == {
+        "attempted": True,
+        "ok": False,
+        "changed_paths": [],
+        "generation": None,
+        "error": {"type": "RuntimeError", "message": "merge conflict"},
+        "cleanup_ok": False,
+        "cleanup_error": {"type": "RuntimeError", "message": "cleanup failed"},
+        "skipped_reason": None,
+    }
+
+
+async def test_subagent_runner_preserves_merge_result_when_finalize_fails_after_merge() -> None:
+    task = replace(
+        _task("backend_editor"),
+        write_scope_json={"paths": ["src"]},
+    )
+    task_port = _FinalizeReturnsNoneTaskPort(task)
+    workspace_port = _TrackingWorkspacePort(task_port=task_port)
+    runner = SubagentRunner(
+        task_port=task_port,
+        run_port=_SubagentRunPort(),
+        event_log=_EventLog(),
+        llm_client=ScriptedLLMClient([_final_turn]),
+        workspace_port=workspace_port,
+    )
+
+    with pytest.raises(RuntimeError, match="subagent task disappeared"):
+        await runner.run_next(
+            SubagentRunnerRequest(
+                workspace_isolation_enabled=True,
+                inline_parallel_enabled=True,
+            )
+        )
+
+    failed = task_port.load_task("task-1")
+    assert failed is not None
+    assert failed.status == SubagentTaskStatus.FAILED
+    assert failed.outcome_json is not None
+    assert failed.outcome_json["failure"] == {
+        "type": "finalize_failed_after_merge",
+        "error_type": "RuntimeError",
+        "message": "subagent task disappeared: task-1",
+    }
+    assert failed.outcome_json["workspace_merge"] == {
+        "attempted": True,
+        "ok": True,
+        "changed_paths": ["src/app.py"],
+        "generation": 7,
+        "error": None,
+        "cleanup_ok": True,
+        "cleanup_error": None,
         "skipped_reason": None,
     }
 

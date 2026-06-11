@@ -112,6 +112,23 @@ class SubagentBatchRunnerResult:
     errors: tuple[SubagentBatchRunnerError, ...] = ()
 
 
+class SubagentTaskClaimLostError(RuntimeError):
+    """Current worker no longer owns the claimed task."""
+
+    def __init__(self, task_id: str, status: str | None = None) -> None:
+        self.task_id = task_id
+        self.status = status
+        super().__init__(f"subagent task claim lost: {task_id}; status={status}")
+
+
+class SubagentTaskLostError(RuntimeError):
+    """Claimed task disappeared before this worker could start an attempt."""
+
+    def __init__(self, task_id: str) -> None:
+        self.task_id = task_id
+        super().__init__(f"subagent task disappeared before attempt: {task_id}")
+
+
 class SubagentRunner:
     """Claim and execute one subagent task using public core/contracts ports."""
 
@@ -168,12 +185,18 @@ class SubagentRunner:
         attempted_task = task
         run: SubagentRunRecord | None = None
         workspace: SubagentWorkspaceHandle | None = None
+        merge_attempted = False
+        merge_result: SubagentWorkspaceMergeResult | None = None
+        merge_error: Exception | None = None
+        merge_cleanup_ok: bool | None = None
+        merge_cleanup_error: Exception | None = None
         try:
             marked_task = self._task_port.mark_attempt_started(task_id=task.task_id)
             if marked_task is None:
-                raise RuntimeError(
-                    f"subagent task cannot be marked attempt started: {task.task_id}"
-                )
+                latest_task = self._task_port.load_task(task.task_id)
+                if latest_task is None:
+                    raise SubagentTaskLostError(task.task_id)
+                raise SubagentTaskClaimLostError(task.task_id, str(latest_task.status))
             attempted_task = marked_task
             run = self._run_port.create_run_for_task(
                 attempted_task,
@@ -232,8 +255,6 @@ class SubagentRunner:
                 kernel_result.stop_reason,
                 resolved_request,
             )
-            merge_result: SubagentWorkspaceMergeResult | None = None
-            merge_error: Exception | None = None
             if merge_attempted:
                 try:
                     merge_result = self._merge_workspace_if_needed(
@@ -241,8 +262,16 @@ class SubagentRunner:
                         kernel_result.stop_reason,
                         resolved_request,
                     )
+                    merge_cleanup_ok = True
                 except Exception as exc:
                     merge_error = exc
+                    try:
+                        if workspace is not None:
+                            workspace.cleanup()
+                        merge_cleanup_ok = True
+                    except Exception as cleanup_exc:
+                        merge_cleanup_ok = False
+                        merge_cleanup_error = cleanup_exc
             completed_task = self._finalize_task(
                 attempted_task,
                 kernel_result,
@@ -252,6 +281,8 @@ class SubagentRunner:
                 merge_attempted=merge_attempted,
                 merge_result=merge_result,
                 merge_error=merge_error,
+                merge_cleanup_ok=merge_cleanup_ok,
+                merge_cleanup_error=merge_cleanup_error,
             )
             summary = summarize_kernel_result(
                 run_id=run.run_id,
@@ -297,6 +328,8 @@ class SubagentRunner:
             )
             await notify_run_observer(self._run_observer, summary)
             raise
+        except (SubagentTaskClaimLostError, SubagentTaskLostError):
+            raise
         except Exception as exc:
             events = (
                 tuple(self._event_log.stream_events(run.run_id))
@@ -314,6 +347,16 @@ class SubagentRunner:
                 exc,
                 run_id=run.run_id if run is not None else None,
                 delay_seconds=resolved_request.failure_retry_delay_seconds,
+                merge_attempted=merge_attempted,
+                merge_result=merge_result,
+                merge_error=merge_error,
+                merge_cleanup_ok=merge_cleanup_ok,
+                merge_cleanup_error=merge_cleanup_error,
+                failure_stage=(
+                    "finalize_after_merge"
+                    if merge_attempted
+                    else "runtime"
+                ),
             )
             await notify_run_observer(self._run_observer, summary)
             raise
@@ -402,11 +445,15 @@ class SubagentRunner:
         merge_attempted: bool,
         merge_result: SubagentWorkspaceMergeResult | None,
         merge_error: Exception | None,
+        merge_cleanup_ok: bool | None,
+        merge_cleanup_error: Exception | None,
     ) -> SubagentTaskRecord:
         workspace_merge = _workspace_merge_outcome(
             attempted=merge_attempted,
             result=merge_result,
             error=merge_error,
+            cleanup_ok=merge_cleanup_ok,
+            cleanup_error=merge_cleanup_error,
         )
         if kernel_result.stop_reason == CoreErrorType.CANCELLED.value:
             failure = {"type": "CancelledError", "message": "cancelled"}
@@ -529,7 +576,25 @@ class SubagentRunner:
         *,
         run_id: str | None = None,
         delay_seconds: int | None = None,
+        merge_attempted: bool = False,
+        merge_result: SubagentWorkspaceMergeResult | None = None,
+        merge_error: Exception | None = None,
+        merge_cleanup_ok: bool | None = None,
+        merge_cleanup_error: Exception | None = None,
+        failure_stage: str = "runtime",
     ) -> SubagentTaskRecord | None:
+        failure_type = (
+            "finalize_failed_after_merge"
+            if failure_stage == "finalize_after_merge"
+            else exc.__class__.__name__
+        )
+        workspace_merge = _workspace_merge_outcome(
+            attempted=merge_attempted,
+            result=merge_result,
+            error=merge_error,
+            cleanup_ok=merge_cleanup_ok,
+            cleanup_error=merge_cleanup_error,
+        )
         outcome = build_subagent_outcome_json(
             stop_reason=None,
             tool_history=(),
@@ -542,7 +607,12 @@ class SubagentRunner:
             agent_profile=task.agent_profile,
             write_scope_json=task.write_scope_json,
             error_message=str(exc),
-            failure={"type": exc.__class__.__name__, "message": str(exc)},
+            workspace_merge=workspace_merge,
+            failure={
+                "type": failure_type,
+                "error_type": exc.__class__.__name__,
+                "message": str(exc),
+            },
         )
         recorded = self._task_port.record_failure(
             task_id=task.task_id,
@@ -679,7 +749,17 @@ def _workspace_merge_outcome(
     attempted: bool,
     result: SubagentWorkspaceMergeResult | None,
     error: Exception | None,
+    cleanup_ok: bool | None = None,
+    cleanup_error: Exception | None = None,
 ) -> dict[str, Any]:
+    cleanup_error_json = (
+        {
+            "type": cleanup_error.__class__.__name__,
+            "message": str(cleanup_error),
+        }
+        if cleanup_error is not None
+        else None
+    )
     if error is not None:
         return {
             "attempted": attempted,
@@ -690,6 +770,8 @@ def _workspace_merge_outcome(
                 "type": error.__class__.__name__,
                 "message": str(error),
             },
+            "cleanup_ok": cleanup_ok,
+            "cleanup_error": cleanup_error_json,
         }
     if result is not None:
         return {
@@ -698,6 +780,8 @@ def _workspace_merge_outcome(
             "changed_paths": list(result.merged_paths),
             "generation": result.generation,
             "error": None,
+            "cleanup_ok": cleanup_ok,
+            "cleanup_error": cleanup_error_json,
         }
     return {
         "attempted": attempted,
@@ -705,6 +789,8 @@ def _workspace_merge_outcome(
         "changed_paths": [],
         "generation": None,
         "error": None,
+        "cleanup_ok": cleanup_ok,
+        "cleanup_error": cleanup_error_json,
         "skipped_reason": None if attempted else "not_required",
     }
 

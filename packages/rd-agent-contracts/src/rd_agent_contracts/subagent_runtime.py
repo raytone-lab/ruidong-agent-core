@@ -278,9 +278,12 @@ def _normalize_workspace_merge(value: Mapping[str, Any] | None) -> dict[str, Any
             "changed_paths": [],
             "generation": None,
             "error": None,
+            "cleanup_ok": None,
+            "cleanup_error": None,
             "skipped_reason": "not_required",
         }
     error = value.get("error")
+    cleanup_error = value.get("cleanup_error")
     changed_paths = value.get("changed_paths") or value.get("merged_paths") or []
     if not isinstance(changed_paths, Sequence) or isinstance(changed_paths, (str, bytes)):
         changed_paths = []
@@ -290,6 +293,12 @@ def _normalize_workspace_merge(value: Mapping[str, Any] | None) -> dict[str, Any
         "changed_paths": [str(path) for path in changed_paths],
         "generation": value.get("generation"),
         "error": dict(error) if isinstance(error, Mapping) else None,
+        "cleanup_ok": value.get("cleanup_ok")
+        if isinstance(value.get("cleanup_ok"), bool)
+        else None,
+        "cleanup_error": dict(cleanup_error)
+        if isinstance(cleanup_error, Mapping)
+        else None,
         "skipped_reason": _string_or_none(value.get("skipped_reason")),
     }
 
