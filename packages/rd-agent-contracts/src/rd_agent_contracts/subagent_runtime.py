@@ -176,6 +176,7 @@ def build_subagent_outcome_json(
     run_id: str | None = None,
     tool_call_counts: Any | None = None,
     workspace_merge: Mapping[str, Any] | None = None,
+    workspace_cleanup: Mapping[str, Any] | None = None,
     agent_profile: str | None = None,
     write_scope_json: Mapping[str, Any] | None = None,
     error_message: str | None = None,
@@ -239,6 +240,7 @@ def build_subagent_outcome_json(
         "tool_error_type": first_failed_tool_error_type(failed_entries),
         "error_message": error_message[:1000] if error_message else None,
         "workspace_merge": _normalize_workspace_merge(workspace_merge),
+        "workspace_cleanup": _normalize_workspace_cleanup(workspace_cleanup),
         "tool_calls_count": tool_calls_count,
         "tool_call_counts": normalized_tool_call_counts,
         "turns_count": turns_count,
@@ -300,6 +302,21 @@ def _normalize_workspace_merge(value: Mapping[str, Any] | None) -> dict[str, Any
         if isinstance(cleanup_error, Mapping)
         else None,
         "skipped_reason": _string_or_none(value.get("skipped_reason")),
+    }
+
+
+def _normalize_workspace_cleanup(value: Mapping[str, Any] | None) -> dict[str, Any]:
+    if value is None:
+        return {
+            "attempted": False,
+            "ok": None,
+            "error": None,
+        }
+    error = value.get("error")
+    return {
+        "attempted": bool(value.get("attempted", False)),
+        "ok": value.get("ok") if isinstance(value.get("ok"), bool) else None,
+        "error": dict(error) if isinstance(error, Mapping) else None,
     }
 
 

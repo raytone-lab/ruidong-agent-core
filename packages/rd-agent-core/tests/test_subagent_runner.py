@@ -725,6 +725,116 @@ async def test_subagent_runner_preserves_merge_result_when_finalize_fails_after_
     }
 
 
+async def test_subagent_runner_cleans_workspace_when_kernel_fails_after_prepare() -> None:
+    task = replace(
+        _task("backend_editor"),
+        write_scope_json={"paths": ["src"]},
+    )
+    task_port = _SubagentTaskPort(task)
+    workspace_port = _TrackingWorkspacePort(task_port=task_port)
+    runner = SubagentRunner(
+        task_port=task_port,
+        run_port=_SubagentRunPort(),
+        event_log=_EventLog(),
+        llm_client=ScriptedLLMClient([]),
+        workspace_port=workspace_port,
+    )
+
+    with pytest.raises(RuntimeError, match="no scripted LLM turn"):
+        await runner.run_next(
+            SubagentRunnerRequest(
+                workspace_isolation_enabled=True,
+                inline_parallel_enabled=True,
+            )
+        )
+
+    failed = task_port.load_task("task-1")
+    assert failed is not None
+    assert failed.status == SubagentTaskStatus.FAILED
+    assert workspace_port.handle.cleanup_calls == 1
+    assert failed.outcome_json is not None
+    assert failed.outcome_json["workspace_cleanup"] == {
+        "attempted": True,
+        "ok": True,
+        "error": None,
+    }
+
+
+async def test_subagent_runner_cleans_workspace_when_cancelled_after_prepare() -> None:
+    task = replace(
+        _task("backend_editor"),
+        write_scope_json={"paths": ["src"]},
+    )
+    task_port = _SubagentTaskPort(task)
+    workspace_port = _TrackingWorkspacePort(task_port=task_port)
+    runner = SubagentRunner(
+        task_port=task_port,
+        run_port=_SubagentRunPort(),
+        event_log=_EventLog(),
+        llm_client=ScriptedLLMClient([_cancelled_turn]),
+        workspace_port=workspace_port,
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        await runner.run_next(
+            SubagentRunnerRequest(
+                workspace_isolation_enabled=True,
+                inline_parallel_enabled=True,
+            )
+        )
+
+    cancelled = task_port.load_task("task-1")
+    assert cancelled is not None
+    assert cancelled.status == SubagentTaskStatus.CANCELLED
+    assert workspace_port.handle.cleanup_calls == 1
+    assert cancelled.outcome_json is not None
+    assert cancelled.outcome_json["workspace_cleanup"] == {
+        "attempted": True,
+        "ok": True,
+        "error": None,
+    }
+
+
+async def test_subagent_runner_preserves_original_error_when_runtime_cleanup_fails() -> None:
+    task = replace(
+        _task("backend_editor"),
+        write_scope_json={"paths": ["src"]},
+    )
+    task_port = _SubagentTaskPort(task)
+    workspace_port = _TrackingWorkspacePort(
+        task_port=task_port,
+        cleanup_fail=True,
+    )
+    runner = SubagentRunner(
+        task_port=task_port,
+        run_port=_SubagentRunPort(),
+        event_log=_EventLog(),
+        llm_client=ScriptedLLMClient([]),
+        workspace_port=workspace_port,
+    )
+
+    with pytest.raises(RuntimeError, match="no scripted LLM turn"):
+        await runner.run_next(
+            SubagentRunnerRequest(
+                workspace_isolation_enabled=True,
+                inline_parallel_enabled=True,
+            )
+        )
+
+    failed = task_port.load_task("task-1")
+    assert failed is not None
+    assert failed.status == SubagentTaskStatus.FAILED
+    assert failed.error_message == "no scripted LLM turn at index 0"
+    assert workspace_port.handle.cleanup_calls == 1
+    assert failed.outcome_json is not None
+    assert failed.outcome_json["failure"]["message"] == "no scripted LLM turn at index 0"
+    assert failed.outcome_json["workspace_cleanup"] == {
+        "attempted": True,
+        "ok": False,
+        "error": {"type": "RuntimeError", "message": "cleanup failed"},
+    }
+
+
 async def test_subagent_runner_marks_cancelled_when_task_is_cancelled() -> None:
     task_port = _SubagentTaskPort(_task("general"))
     runner = SubagentRunner(

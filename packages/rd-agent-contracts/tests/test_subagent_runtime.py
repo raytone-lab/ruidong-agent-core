@@ -63,6 +63,11 @@ def test_subagent_outcome_schema_extracts_paths_validation_and_errors():
             "ok": False,
             "error": {"type": "WorkspaceMergeError", "message": "conflict"},
         },
+        workspace_cleanup={
+            "attempted": True,
+            "ok": False,
+            "error": {"type": "RuntimeError", "message": "cleanup failed"},
+        },
         agent_profile="browser_verifier",
         write_scope_json={"paths": ["client"]},
         error_message="tool limit",
@@ -93,6 +98,11 @@ def test_subagent_outcome_schema_extracts_paths_validation_and_errors():
         "cleanup_ok": None,
         "cleanup_error": None,
         "skipped_reason": None,
+    }
+    assert outcome["workspace_cleanup"] == {
+        "attempted": True,
+        "ok": False,
+        "error": {"type": "RuntimeError", "message": "cleanup failed"},
     }
     assert outcome["turns_count"] == 3
 

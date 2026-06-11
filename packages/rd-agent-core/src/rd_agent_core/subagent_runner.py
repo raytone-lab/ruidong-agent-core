@@ -314,6 +314,12 @@ class SubagentRunner:
                 if run is not None
                 else ()
             )
+            workspace_cleanup_ok: bool | None = None
+            workspace_cleanup_error: Exception | None = None
+            if workspace is not None and not merge_attempted:
+                workspace_cleanup_ok, workspace_cleanup_error = (
+                    _cleanup_workspace_after_failure(workspace)
+                )
             summary = summarize_failed_run(
                 run_id=run.run_id if run is not None else attempted_task.task_id,
                 status="cancelled",
@@ -325,6 +331,8 @@ class SubagentRunner:
             self._record_task_cancelled(
                 attempted_task,
                 run_id=run.run_id if run is not None else None,
+                workspace_cleanup_ok=workspace_cleanup_ok,
+                workspace_cleanup_error=workspace_cleanup_error,
             )
             await notify_run_observer(self._run_observer, summary)
             raise
@@ -336,6 +344,12 @@ class SubagentRunner:
                 if run is not None
                 else ()
             )
+            workspace_cleanup_ok: bool | None = None
+            workspace_cleanup_error: Exception | None = None
+            if workspace is not None and not merge_attempted:
+                workspace_cleanup_ok, workspace_cleanup_error = (
+                    _cleanup_workspace_after_failure(workspace)
+                )
             summary = summarize_failed_run(
                 run_id=run.run_id if run is not None else attempted_task.task_id,
                 error_message=str(exc),
@@ -352,6 +366,8 @@ class SubagentRunner:
                 merge_error=merge_error,
                 merge_cleanup_ok=merge_cleanup_ok,
                 merge_cleanup_error=merge_cleanup_error,
+                workspace_cleanup_ok=workspace_cleanup_ok,
+                workspace_cleanup_error=workspace_cleanup_error,
                 failure_stage=(
                     "finalize_after_merge"
                     if merge_attempted
@@ -581,6 +597,8 @@ class SubagentRunner:
         merge_error: Exception | None = None,
         merge_cleanup_ok: bool | None = None,
         merge_cleanup_error: Exception | None = None,
+        workspace_cleanup_ok: bool | None = None,
+        workspace_cleanup_error: Exception | None = None,
         failure_stage: str = "runtime",
     ) -> SubagentTaskRecord | None:
         failure_type = (
@@ -608,6 +626,10 @@ class SubagentRunner:
             write_scope_json=task.write_scope_json,
             error_message=str(exc),
             workspace_merge=workspace_merge,
+            workspace_cleanup=_workspace_cleanup_outcome(
+                ok=workspace_cleanup_ok,
+                error=workspace_cleanup_error,
+            ),
             failure={
                 "type": failure_type,
                 "error_type": exc.__class__.__name__,
@@ -633,6 +655,8 @@ class SubagentRunner:
         task: SubagentTaskRecord,
         *,
         run_id: str | None = None,
+        workspace_cleanup_ok: bool | None = None,
+        workspace_cleanup_error: Exception | None = None,
     ) -> SubagentTaskRecord | None:
         outcome = build_subagent_outcome_json(
             stop_reason=CoreErrorType.CANCELLED.value,
@@ -646,6 +670,10 @@ class SubagentRunner:
             agent_profile=task.agent_profile,
             write_scope_json=task.write_scope_json,
             error_message="cancelled",
+            workspace_cleanup=_workspace_cleanup_outcome(
+                ok=workspace_cleanup_ok,
+                error=workspace_cleanup_error,
+            ),
             failure={"type": "CancelledError", "message": "cancelled"},
         )
         return self._task_port.mark_cancelled(
@@ -792,6 +820,37 @@ def _workspace_merge_outcome(
         "cleanup_ok": cleanup_ok,
         "cleanup_error": cleanup_error_json,
         "skipped_reason": None if attempted else "not_required",
+    }
+
+
+def _cleanup_workspace_after_failure(
+    workspace: SubagentWorkspaceHandle | None,
+) -> tuple[bool | None, Exception | None]:
+    if workspace is None:
+        return None, None
+    try:
+        workspace.cleanup()
+        return True, None
+    except Exception as exc:  # noqa: BLE001 - cleanup must not mask run failure.
+        return False, exc
+
+
+def _workspace_cleanup_outcome(
+    *,
+    ok: bool | None,
+    error: Exception | None,
+) -> dict[str, Any]:
+    return {
+        "attempted": ok is not None or error is not None,
+        "ok": ok,
+        "error": (
+            {
+                "type": error.__class__.__name__,
+                "message": str(error),
+            }
+            if error is not None
+            else None
+        ),
     }
 
 
