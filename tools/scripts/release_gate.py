@@ -47,6 +47,14 @@ def default_steps(*, coverage: bool = True) -> tuple[GateStep, ...]:
             ),
         ),
         GateStep(
+            "protocol-contracts",
+            ("uv", "run", "python", "tools/scripts/verify_protocol.py"),
+        ),
+        GateStep(
+            "governance-docs",
+            ("uv", "run", "python", "tools/scripts/verify_governance.py"),
+        ),
+        GateStep(
             "reference-host-examples",
             ("uv", "run", "pytest", "-q", "examples/reference_host/tests"),
         ),

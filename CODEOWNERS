@@ -1,0 +1,25 @@
+# Default ownership. Keep this broad until package-specific owners are assigned.
+* @shinelee211-arch
+
+# Runtime packages and their public contracts.
+/packages/rd-agent-contracts/ @shinelee211-arch
+/packages/rd-agent-proto/ @shinelee211-arch
+/packages/rd-agent-core/ @shinelee211-arch
+/packages/rd-llm-adapter/ @shinelee211-arch
+
+# Historical or support packages still built by the release workflow.
+/packages/rd-llm-gateway/ @shinelee211-arch
+/packages/rd-replay-evals/ @shinelee211-arch
+/tools/ @shinelee211-arch
+
+# Product, architecture, protocol, and governance documentation.
+/docs/ @shinelee211-arch
+/proto/ @shinelee211-arch
+/examples/ @shinelee211-arch
+
+# CI and repository governance.
+/.github/ @shinelee211-arch
+/CODEOWNERS @shinelee211-arch
+/CONTRIBUTING.md @shinelee211-arch
+/SECURITY.md @shinelee211-arch
+/AGENTS.md @shinelee211-arch

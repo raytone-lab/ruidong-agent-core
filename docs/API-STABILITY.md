@@ -7,10 +7,11 @@
 当前版本：
 
 - `rd-agent-contracts==1.14.1`
+- `rd-agent-proto==0.1.0`
 - `rd-llm-adapter==1.1.2`
 - `rd-agent-core==0.1.4`
 
-`rd-agent-contracts` 和 `rd-llm-adapter` 已经按 SemVer 风格维护。`rd-agent-core` 仍是 `0.x`，表示核心方向稳定，但运行 API 会根据真实 host 接入反馈继续收紧。
+`rd-agent-contracts`、`rd-agent-proto` 和 `rd-llm-adapter` 已经按 SemVer 风格维护。`rd-agent-core` 仍是 `0.x`，表示核心方向稳定，但运行 API 会根据真实 host 接入反馈继续收紧。
 
 ## 稳定性分级
 
@@ -19,6 +20,7 @@
 这些接口是接入方当前可以依赖的主路径。破坏性变化会尽量避免；如果必须发生，会提供 migration note。
 
 - `rd_agent_contracts` 中已在 `docs/API-REFERENCE.md` 列出的 dataclass；
+- `rd_agent_proto` 中的 generated protobuf bindings 和 dataclass/proto converters；
 - `EventLogPort` 的 append/stream 语义；
 - `RunPersistencePort` 的 run lifecycle 语义；
 - `ToolDefinition`、`ToolExecutionContext`、`ToolExecutionRequest`、`ToolExecutionResult`；

@@ -8,6 +8,7 @@ dependencies = [
     "rd-agent-contracts",
     "rd-llm-adapter",
     "rd-llm-gateway",
+    "rd-agent-proto",
     "rd-replay-evals",
     "rd-tools",
 ]
@@ -18,6 +19,7 @@ members = ["packages/rd-*", "tools"]
 [tool.uv.sources]
 rd-agent-core = { workspace = true }
 rd-agent-contracts = { workspace = true }
+rd-agent-proto = { workspace = true }
 rd-llm-adapter = { workspace = true }
 rd-llm-gateway = { workspace = true }
 rd-replay-evals = { workspace = true }
@@ -26,6 +28,7 @@ rd-tools = { workspace = true }
 [dependency-groups]
 dev = [
     "coverage[toml]>=7.6",
+    "grpcio-tools>=1.73",
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
     "respx>=0.21",
@@ -35,6 +38,7 @@ dev = [
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+extend-exclude = ["packages/rd-agent-proto/src/ruidong/**/*.py"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "N"]
@@ -50,6 +54,7 @@ addopts = "--import-mode=importlib"
 branch = true
 source = [
     "rd_agent_contracts",
+    "rd_agent_proto",
     "rd_agent_core",
     "rd_llm_adapter",
     "rd_llm_gateway",
@@ -61,3 +66,4 @@ source = [
 fail_under = 60
 show_missing = true
 skip_empty = true
+omit = ["packages/rd-agent-proto/src/ruidong/**/*.py"]

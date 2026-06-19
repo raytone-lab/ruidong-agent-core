@@ -176,6 +176,21 @@ event = EventDraft(event_type="wheel_smoke", payload={"ok": True}).to_event(
 assert event.event_type == "wheel_smoke"
 assert Usage(input_tokens=1).input_tokens == 1
 """
+    if package.name == "rd-agent-proto":
+        return """
+from importlib.resources import files
+
+from rd_agent_contracts import EventDraft
+from rd_agent_proto import agent_event_from_proto, agent_event_to_proto
+
+event = EventDraft(event_type="wheel_smoke", payload={"ok": True}).to_event(
+    run_id="run-wheel-smoke",
+    seq=1,
+    timestamp_ms=1,
+)
+assert agent_event_from_proto(agent_event_to_proto(event)) == event
+assert files("rd_agent_proto").joinpath("proto/ruidong/agent/v1/events.proto").is_file()
+"""
     if package.name == "rd-llm-adapter":
         return """
 from rd_llm_adapter import OpenAICompatAdapter, TurnDone, supported_adapter_kinds

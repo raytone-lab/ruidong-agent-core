@@ -7,6 +7,7 @@
 | Package | 当前版本 | 用途 |
 | --- | --- | --- |
 | `rd-agent-contracts` | `1.14.1` | 数据结构、运行合同、host ports、`py.typed` |
+| `rd-agent-proto` | `0.1.0` | Protobuf wire contract、生成的 Python bindings、dataclass/proto converters、`py.typed` |
 | `rd-llm-adapter` | `1.1.2` | Provider 请求构造、流式 chunk 解析、标准事件、`py.typed` |
 | `rd-agent-core` | `0.1.4` | Turn/Run kernel、AgentRunner、ContinuationRunner、provider LLM client、ModelProfile、SubagentRunner、事件写入、运行策略、取消、运行摘要/观测、conformance、业务 adapter 边界、testing harness |
 

@@ -16,6 +16,7 @@ uv sync --all-extras
 
 ```bash
 uv add rd-agent-contracts==1.14.1
+uv add rd-agent-proto==0.1.0
 uv add rd-llm-adapter==1.1.2
 uv add rd-agent-core==0.1.4
 ```

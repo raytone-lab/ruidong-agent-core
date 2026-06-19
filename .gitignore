@@ -13,7 +13,6 @@ build/
 
 # uv
 .venv/
-uv.lock
 
 # Local tool caches
 .npm-cache/

@@ -13,6 +13,7 @@
 当前推荐接入版本：
 
 - `rd-agent-contracts-v1.14.1`
+- `rd-agent-proto-v0.1.0`
 - `rd-llm-adapter-v1.1.2`
 - `rd-agent-core-v0.1.4`
 
@@ -20,6 +21,7 @@ Release notes：
 
 - `rd-agent-core-v0.1.4.md`
 - `rd-agent-core-v0.1.3.md`
+- `rd-agent-proto-v0.1.0.md`
 - `rd-llm-adapter-v1.1.2.md`
 - `rd-agent-contracts-v1.14.1.md`
 - `rd-agent-core-v0.1.2.md`

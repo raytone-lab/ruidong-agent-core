@@ -1,0 +1,63 @@
+{
+  "schema_version": "1.2.0",
+  "description": "A minimal successful run with one text turn and usage.",
+  "events": [
+    {
+      "seq": 1,
+      "timestamp_ms": 1710000000000,
+      "run_id": "run-happy",
+      "turn_id": "turn-1",
+      "event_type": "turn_started",
+      "payload": {
+        "model": "openai-compatible-test",
+        "turn_index": 1,
+        "metadata": {}
+      },
+      "schema_version": "1.2.0",
+      "message_id": null,
+      "action_id": null
+    },
+    {
+      "seq": 2,
+      "timestamp_ms": 1710000000001,
+      "run_id": "run-happy",
+      "turn_id": "turn-1",
+      "event_type": "text_delta",
+      "payload": {
+        "text": "hello",
+        "block_index": 0
+      },
+      "schema_version": "1.2.0",
+      "message_id": null,
+      "action_id": null
+    },
+    {
+      "seq": 3,
+      "timestamp_ms": 1710000000002,
+      "run_id": "run-happy",
+      "turn_id": "turn-1",
+      "event_type": "turn_completed",
+      "payload": {
+        "stop_reason": "end_turn",
+        "raw_stop_reason": "stop",
+        "tool_calls_requested": 0,
+        "tool_calls_executed": 0,
+        "tool_calls_denied": 0,
+        "invalid_tool_calls": 0,
+        "pause_requested": false,
+        "terminal_text": "hello",
+        "terminal_reasoning": "",
+        "usage": {
+          "input_tokens": 1,
+          "output_tokens": 1,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 0
+        }
+      },
+      "schema_version": "1.2.0",
+      "message_id": null,
+      "action_id": null
+    }
+  ]
+}
+

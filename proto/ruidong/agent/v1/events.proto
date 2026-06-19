@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+package ruidong.agent.v1;
+
+import "google/protobuf/struct.proto";
+
+option go_package = "github.com/shinelee211-arch/ruidong-agent-core/gen/go/ruidong/agent/v1;agentv1";
+
+// Mirrors rd_agent_core.events.CoreEventType.
+enum EventType {
+  EVENT_TYPE_UNSPECIFIED = 0;
+  EVENT_TYPE_TURN_STARTED = 1;
+  EVENT_TYPE_TEXT_DELTA = 2;
+  EVENT_TYPE_REASONING_DELTA = 3;
+  EVENT_TYPE_TOOL_CALL_STARTED = 4;
+  EVENT_TYPE_TOOL_CALL_DELTA = 5;
+  EVENT_TYPE_TOOL_CALL_COMPLETED = 6;
+  EVENT_TYPE_TOOL_CALL_INVALID = 7;
+  EVENT_TYPE_USAGE_UPDATE = 8;
+  EVENT_TYPE_TOOL_STARTED = 9;
+  EVENT_TYPE_TOOL_COMPLETED = 10;
+  EVENT_TYPE_TOOL_FAILED = 11;
+  EVENT_TYPE_TURN_PAUSED = 12;
+  EVENT_TYPE_TURN_COMPLETED = 13;
+}
+
+// Append-only event-log envelope.
+message AgentEvent {
+  int64 seq = 1;
+  int64 timestamp_ms = 2;
+  string run_id = 3;
+  string turn_id = 4;
+  string event_type = 5;
+  google.protobuf.Struct payload = 6;
+  string schema_version = 7;
+  optional string message_id = 8;
+  optional string action_id = 9;
+}

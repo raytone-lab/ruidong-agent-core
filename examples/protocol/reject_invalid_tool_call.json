@@ -1,0 +1,53 @@
+{
+  "schema_version": "1.2.0",
+  "description": "A rejected invalid tool call. It is logged but never executable.",
+  "events": [
+    {
+      "seq": 1,
+      "timestamp_ms": 1710000100000,
+      "run_id": "run-reject",
+      "turn_id": "turn-1",
+      "event_type": "tool_call_invalid",
+      "payload": {
+        "id": "call-invalid",
+        "name": "read_file",
+        "raw_args": "[\"README.md\"]",
+        "parse_error": "tool arguments must be a JSON object",
+        "index": 0,
+        "encoding": "native_json",
+        "type": "invalid_tool_call"
+      },
+      "schema_version": "1.2.0",
+      "message_id": null,
+      "action_id": null
+    },
+    {
+      "seq": 2,
+      "timestamp_ms": 1710000100001,
+      "run_id": "run-reject",
+      "turn_id": "turn-1",
+      "event_type": "turn_completed",
+      "payload": {
+        "stop_reason": "end_turn",
+        "raw_stop_reason": "stop",
+        "tool_calls_requested": 0,
+        "tool_calls_executed": 0,
+        "tool_calls_denied": 0,
+        "invalid_tool_calls": 1,
+        "pause_requested": false,
+        "terminal_text": "",
+        "terminal_reasoning": "",
+        "usage": {
+          "input_tokens": 1,
+          "output_tokens": 1,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 0
+        }
+      },
+      "schema_version": "1.2.0",
+      "message_id": null,
+      "action_id": null
+    }
+  ]
+}
+

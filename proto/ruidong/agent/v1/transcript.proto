@@ -1,0 +1,59 @@
+syntax = "proto3";
+
+package ruidong.agent.v1;
+
+import "google/protobuf/struct.proto";
+
+option go_package = "github.com/shinelee211-arch/ruidong-agent-core/gen/go/ruidong/agent/v1;agentv1";
+
+message Usage {
+  int64 input_tokens = 1;
+  int64 output_tokens = 2;
+  int64 cache_creation_input_tokens = 3;
+  int64 cache_read_input_tokens = 4;
+}
+
+message TextBlock {
+  string text = 1;
+  optional google.protobuf.Struct provider_data = 2;
+}
+
+message ReasoningBlock {
+  string text = 1;
+  optional string signature = 2;
+  bool redacted = 3;
+  optional string data = 4;
+  optional google.protobuf.Struct provider_data = 5;
+}
+
+message ToolUseBlock {
+  string id = 1;
+  string name = 2;
+  google.protobuf.Struct input = 3;
+}
+
+message InvalidToolCall {
+  string id = 1;
+  string name = 2;
+  string raw_args = 3;
+  string parse_error = 4;
+  int32 index = 5;
+  optional string encoding = 6;
+}
+
+message ContentBlock {
+  oneof block {
+    TextBlock text = 1;
+    ReasoningBlock reasoning = 2;
+    ToolUseBlock tool_use = 3;
+    InvalidToolCall invalid_tool_call = 4;
+  }
+}
+
+message Message {
+  string message_id = 1;
+  string role = 2;
+  string turn_id = 3;
+  repeated ContentBlock content_blocks = 4;
+  string content_text = 5;
+}

@@ -1,0 +1,73 @@
+syntax = "proto3";
+
+package ruidong.agent.v1;
+
+import "google/protobuf/struct.proto";
+import "ruidong/agent/v1/transcript.proto";
+
+option go_package = "github.com/shinelee211-arch/ruidong-agent-core/gen/go/ruidong/agent/v1;agentv1";
+
+message ToolDefinition {
+  string name = 1;
+  string description = 2;
+  google.protobuf.Struct input_schema = 3;
+  bool mutates_workspace = 4;
+  google.protobuf.Struct metadata = 5;
+}
+
+message ToolExecutionContext {
+  string project_id = 1;
+  optional string tenant_id = 2;
+  optional string lease_id = 3;
+  optional string correlation_id = 4;
+  optional string session_id = 5;
+  optional string user_request_id = 6;
+  optional string agent_run_id = 7;
+  string agent_kind = 8;
+  optional string subagent_task_id = 9;
+  google.protobuf.Struct metadata = 10;
+}
+
+message ToolExecutionRequest {
+  string tool_name = 1;
+  google.protobuf.Struct tool_input = 2;
+  ToolExecutionContext context = 3;
+  optional string tool_use_id = 4;
+  int32 turn = 5;
+}
+
+message ToolExecutionResult {
+  bool ok = 1;
+  string content = 2;
+  string tool_use_id = 3;
+  optional google.protobuf.Struct error = 4;
+  optional int64 duration_ms = 5;
+  google.protobuf.Struct metadata = 6;
+}
+
+message ToolCallCounts {
+  int32 requested = 1;
+  int32 executed = 2;
+  int32 denied = 3;
+}
+
+message RunResultMetadata {
+  Usage usage = 1;
+  int32 turns_count = 2;
+  ToolCallCounts tool_call_counts = 3;
+  google.protobuf.Struct extra = 4;
+}
+
+message TraceContext {
+  string trace_id = 1;
+  string correlation_id = 2;
+  optional string tenant_id = 3;
+  optional string user_id = 4;
+  optional string project_id = 5;
+  optional string session_id = 6;
+  optional string user_request_id = 7;
+  optional string agent_run_id = 8;
+  optional string span_id = 9;
+  optional string parent_span_id = 10;
+  google.protobuf.Struct tags = 11;
+}

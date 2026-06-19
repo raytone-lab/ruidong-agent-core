@@ -29,6 +29,8 @@ def test_default_release_gate_steps_include_coverage_and_examples() -> None:
         "coverage-report",
         "golden-traces",
         "typing-markers",
+        "protocol-contracts",
+        "governance-docs",
         "reference-host-examples",
         "syntax-compile",
     ]

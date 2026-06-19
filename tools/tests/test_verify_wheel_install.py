@@ -26,6 +26,7 @@ def test_discover_workspace_packages_includes_runtime_packages() -> None:
     packages = module.discover_workspace_packages(REPO_ROOT)
 
     assert packages["rd-agent-contracts"].version == "1.14.1"
+    assert packages["rd-agent-proto"].version == "0.1.0"
     assert packages["rd-llm-adapter"].version == "1.1.2"
     assert packages["rd-agent-core"].version == "0.1.4"
     assert packages["rd-tools"].package_dir == REPO_ROOT / "tools"
@@ -41,6 +42,18 @@ def test_resolve_local_install_order_for_agent_core() -> None:
         "rd-agent-contracts",
         "rd-llm-adapter",
         "rd-agent-core",
+    ]
+
+
+def test_resolve_local_install_order_for_agent_proto() -> None:
+    module = _load_module()
+    packages = module.discover_workspace_packages(REPO_ROOT)
+
+    order = module.resolve_local_install_order("rd-agent-proto", packages)
+
+    assert [package.name for package in order] == [
+        "rd-agent-contracts",
+        "rd-agent-proto",
     ]
 
 
@@ -93,3 +106,13 @@ def test_smoke_code_for_core_exercises_harness() -> None:
     assert "ContinuationRunner" in smoke
     assert "SubagentBatchRunner" in smoke
     assert "ScriptedLLMClient" in smoke
+
+
+def test_smoke_code_for_proto_exercises_converter() -> None:
+    module = _load_module()
+    packages = module.discover_workspace_packages(REPO_ROOT)
+
+    smoke = module.smoke_code_for(packages["rd-agent-proto"])
+
+    assert "agent_event_to_proto" in smoke
+    assert "agent_event_from_proto" in smoke
