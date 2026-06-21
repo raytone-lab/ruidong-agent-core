@@ -328,13 +328,17 @@ class SubagentRunner:
                 events=events,
                 metadata={"subagent_task_id": attempted_task.task_id},
             )
-            self._record_task_cancelled(
+            completed_task = self._record_task_cancelled(
                 attempted_task,
                 run_id=run.run_id if run is not None else None,
                 workspace_cleanup_ok=workspace_cleanup_ok,
                 workspace_cleanup_error=workspace_cleanup_error,
             )
             await notify_run_observer(self._run_observer, summary)
+            if completed_task is None:
+                raise RuntimeError(
+                    f"subagent task disappeared: {attempted_task.task_id}"
+                ) from None
             raise
         except (SubagentTaskClaimLostError, SubagentTaskLostError):
             raise
@@ -356,7 +360,7 @@ class SubagentRunner:
                 events=events,
                 metadata={"subagent_task_id": attempted_task.task_id},
             )
-            self._record_task_failure(
+            completed_task = self._record_task_failure(
                 attempted_task,
                 exc,
                 run_id=run.run_id if run is not None else None,
@@ -375,6 +379,10 @@ class SubagentRunner:
                 ),
             )
             await notify_run_observer(self._run_observer, summary)
+            if completed_task is None:
+                raise RuntimeError(
+                    f"subagent task disappeared: {attempted_task.task_id}"
+                ) from exc
             raise
 
     def _prepare_workspace(

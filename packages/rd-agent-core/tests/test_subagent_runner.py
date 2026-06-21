@@ -214,6 +214,20 @@ class _SubagentTaskPort:
         return updated
 
 
+class _FailureWritebackNoneTaskPort(_SubagentTaskPort):
+    def mark_failed(self, **kwargs) -> SubagentTaskRecord | None:
+        return None
+
+    def record_failure(self, **kwargs) -> SubagentTaskRecord | None:
+        self.failures.append((kwargs["task_id"], kwargs["error_message"]))
+        return None
+
+
+class _CancelWritebackNoneTaskPort(_SubagentTaskPort):
+    def mark_cancelled(self, **kwargs) -> SubagentTaskRecord | None:
+        return None
+
+
 class _SubagentRunPort:
     def __init__(self) -> None:
         self.created: list[SubagentRunRecord] = []
@@ -505,6 +519,21 @@ async def test_subagent_runner_records_failure_when_workspace_prepare_fails() ->
     assert failed.status == SubagentTaskStatus.FAILED
     assert failed.error_message == "workspace prepare failed"
     assert task_port.failures == [("task-1", "workspace prepare failed")]
+
+
+async def test_subagent_runner_raises_when_failure_writeback_fails() -> None:
+    task_port = _FailureWritebackNoneTaskPort(_task("general"))
+    runner = SubagentRunner(
+        task_port=task_port,
+        run_port=_SubagentRunPort(),
+        event_log=_EventLog(),
+        llm_client=ScriptedLLMClient([]),
+    )
+
+    with pytest.raises(RuntimeError, match="subagent task disappeared"):
+        await runner.run_next(SubagentRunnerRequest())
+
+    assert task_port.failures == [("task-1", "no scripted LLM turn at index 0")]
 
 
 async def test_subagent_runner_does_not_record_failure_when_attempt_claim_lost() -> None:
@@ -852,6 +881,19 @@ async def test_subagent_runner_marks_cancelled_when_task_is_cancelled() -> None:
     assert cancelled.status == SubagentTaskStatus.CANCELLED
     assert cancelled.outcome_json is not None
     assert cancelled.outcome_json["status"] == "cancelled"
+
+
+async def test_subagent_runner_raises_when_cancel_writeback_fails() -> None:
+    task_port = _CancelWritebackNoneTaskPort(_task("general"))
+    runner = SubagentRunner(
+        task_port=task_port,
+        run_port=_SubagentRunPort(),
+        event_log=_EventLog(),
+        llm_client=ScriptedLLMClient([_cancelled_turn]),
+    )
+
+    with pytest.raises(RuntimeError, match="subagent task disappeared"):
+        await runner.run_next(SubagentRunnerRequest())
 
 
 async def test_subagent_summary_status_matches_waiting_task_status() -> None:

@@ -24,7 +24,7 @@ A consumer must treat these as stable inputs:
 
 - `AgentEvent` envelope;
 - event type strings;
-- transcript blocks;
+- transcript messages, content blocks, and tool call/result pairing;
 - usage;
 - tool definitions and execution result shapes;
 - trace context.
@@ -32,6 +32,11 @@ A consumer must treat these as stable inputs:
 Behavioral contracts such as event idempotency, run lifecycle transitions, and
 tool execution policy remain host/SDK behavior and are verified through
 conformance tests rather than protobuf alone.
+
+`google.protobuf.Struct` does not preserve an integer/number distinction on the
+wire. Python converters restore integer-like floats after roundtrip; other
+language bindings should normalize values such as `1.0` to `1` at SDK/tool
+boundaries when strict JSON Schema `integer` validation matters.
 
 ## Planned Binding Targets
 

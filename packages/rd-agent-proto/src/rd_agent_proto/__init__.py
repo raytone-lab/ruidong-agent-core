@@ -3,6 +3,8 @@
 from .converters import (
     agent_event_from_proto,
     agent_event_to_proto,
+    message_from_proto,
+    message_to_proto,
     tool_definition_from_proto,
     tool_definition_to_proto,
     tool_execution_context_from_proto,
@@ -20,6 +22,8 @@ __version__ = "0.1.0"
 __all__ = [
     "agent_event_from_proto",
     "agent_event_to_proto",
+    "message_from_proto",
+    "message_to_proto",
     "tool_definition_from_proto",
     "tool_definition_to_proto",
     "tool_execution_context_from_proto",
@@ -31,4 +35,3 @@ __all__ = [
     "usage_from_proto",
     "usage_to_proto",
 ]
-

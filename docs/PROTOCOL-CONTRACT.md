@@ -20,7 +20,7 @@ The proto files define stable, language-neutral data shapes:
 
 - `AgentEvent` envelope;
 - core event type names;
-- transcript content blocks;
+- transcript messages, content blocks, and tool call/result pairing;
 - tool definitions, tool execution requests, and tool execution results;
 - usage;
 - run lifecycle summaries;
@@ -41,6 +41,12 @@ Files:
 Generated Python bindings live under `packages/rd-agent-proto/src/ruidong`.
 Converters between Python dataclasses and protobuf messages live in
 `packages/rd-agent-proto/src/rd_agent_proto/converters.py`.
+
+`google.protobuf.Struct` stores JSON numbers as doubles. The Python converters
+normalize integer-like values back to `int` after `MessageToDict()` so JSON
+Schema `integer` tool inputs survive proto roundtrip in Python. Non-Python
+consumers should apply the same boundary normalization before invoking strict
+tool-input validators.
 
 ## What Stays in Python Contracts
 

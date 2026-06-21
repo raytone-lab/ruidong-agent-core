@@ -50,10 +50,26 @@ message ContentBlock {
   }
 }
 
+message ToolCall {
+  string tool_use_id = 1;
+  string tool_name = 2;
+  google.protobuf.Struct input = 3;
+  string status = 4;
+}
+
+message ToolResult {
+  string tool_use_id = 1;
+  bool ok = 2;
+  string content = 3;
+  optional google.protobuf.Struct error = 4;
+}
+
 message Message {
   string message_id = 1;
   string role = 2;
   string turn_id = 3;
   repeated ContentBlock content_blocks = 4;
   string content_text = 5;
+  repeated ToolCall tool_calls = 6;
+  repeated ToolResult tool_results = 7;
 }

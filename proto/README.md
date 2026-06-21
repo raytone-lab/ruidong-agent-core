@@ -7,7 +7,7 @@ contracts that already exist in `rd-agent-contracts` and `rd-agent-core`.
 ## Files
 
 - `ruidong/agent/v1/events.proto`: event envelope and runtime event names.
-- `ruidong/agent/v1/transcript.proto`: transcript blocks and usage.
+- `ruidong/agent/v1/transcript.proto`: transcript messages, blocks, tool pairs, and usage.
 - `ruidong/agent/v1/runtime.proto`: tools, run summaries, and trace identity.
 
 ## Policy

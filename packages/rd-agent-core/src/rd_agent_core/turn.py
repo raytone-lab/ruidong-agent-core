@@ -392,6 +392,7 @@ class TurnKernel:
                         "terminal_text": "",
                         "terminal_reasoning": "",
                         "usage": asdict(usage),
+                        "provider_state": None,
                     },
                     idempotency_key=f"{request.turn_id}:turn_completed",
                 )
@@ -478,6 +479,7 @@ class TurnKernel:
                         "reasoning",
                     ),
                     "usage": asdict(usage),
+                    "provider_state": turn_done.provider_state,
                 },
                 idempotency_key=f"{request.turn_id}:turn_completed",
             )

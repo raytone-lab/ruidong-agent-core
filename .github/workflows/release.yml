@@ -49,7 +49,6 @@ jobs:
           uv build --wheel packages/rd-llm-gateway
           uv build --wheel packages/rd-replay-evals
           uv build --wheel tools
-          uv build --wheel "${{ steps.parse.outputs.pkg_dir }}"
           ls -la dist/
 
       - name: Verify wheel install smoke

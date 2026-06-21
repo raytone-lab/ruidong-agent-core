@@ -454,6 +454,44 @@ async def test_turn_kernel_dedupes_stream_events_on_turn_retry() -> None:
     ]
 
 
+async def test_turn_kernel_writes_provider_state_to_turn_completed_event() -> None:
+    provider_state = {
+        "provider_error": {
+            "adapter_kind": "openai_compat",
+            "error_type": "RuntimeError",
+            "message": "stream failed",
+            "partial_output_emitted": True,
+        }
+    }
+    llm = _LLMClient(
+        [
+            TurnDone(
+                stop_reason="error",
+                content=[TextBlock("partial")],
+                text_blocks=[TextBlock("partial")],
+                reasoning_blocks=[],
+                tool_calls=[],
+                invalid_tool_calls=[],
+                provider_state=provider_state,
+                raw_stop_reason="error",
+            ),
+        ]
+    )
+    log = _InMemoryEventLog()
+    kernel = TurnKernel(
+        llm_client=llm,
+        event_writer=CoreEventWriter(log, run_id="run-1"),
+    )
+
+    result = await kernel.run_turn(_request())
+
+    completed = next(
+        event for event in result.events if event.event_type == CoreEventType.TURN_COMPLETED
+    )
+    assert result.provider_state == provider_state
+    assert completed.payload["provider_state"] == provider_state
+
+
 async def test_turn_kernel_awaits_async_tool_executor() -> None:
     tool_call = ToolUseBlock(id="tool-1", name="read_file", input={"path": "README.md"})
     llm = _LLMClient(
