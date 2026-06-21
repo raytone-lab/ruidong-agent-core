@@ -15,7 +15,16 @@ from rd_agent_contracts import (
     ToolUseBlock,
 )
 from rd_agent_core import CoreEventType, CoreEventWriter, CoreToolPolicy, TurnKernel, TurnRequest
-from rd_llm_adapter import TextDelta, ToolCallArgsDelta, ToolCallEnd, ToolCallStart, TurnDone
+from rd_llm_adapter import (
+    ReasoningDelta,
+    TextDelta,
+    ToolCallArgsDelta,
+    ToolCallEnd,
+    ToolCallIdDelta,
+    ToolCallNameDelta,
+    ToolCallStart,
+    TurnDone,
+)
 from rd_llm_adapter.events import StandardEvent, UsageUpdate
 
 
@@ -378,6 +387,71 @@ async def test_turn_kernel_dedupes_usage_update_on_turn_retry() -> None:
     ]
     assert len(usage_events) == 1
     assert usage_events[0].payload["usage_sequence"] == 1
+
+
+async def test_turn_kernel_dedupes_stream_events_on_turn_retry() -> None:
+    llm = _LLMClient(
+        [
+            ReasoningDelta("plan ", block_index=0),
+            TextDelta("hel", block_index=0),
+            TextDelta("lo", block_index=0),
+            ToolCallStart(index=0),
+            ToolCallIdDelta(index=0, call_id="tool-1"),
+            ToolCallNameDelta(index=0, name_delta="read_file", call_id="tool-1"),
+            ToolCallArgsDelta(index=0, call_id="tool-1", delta='{"path"'),
+            ToolCallArgsDelta(index=0, call_id="tool-1", delta=':"README.md"}'),
+            ToolCallEnd(
+                call_id="tool-1",
+                name="read_file",
+                index=0,
+                encoding="native_json",
+                raw_args='{"path":"README.md"}',
+                parsed_input={"path": "README.md"},
+                parse_error=None,
+            ),
+            TurnDone(
+                stop_reason="stop",
+                content=[TextBlock("hello")],
+                text_blocks=[TextBlock("hello")],
+                reasoning_blocks=[],
+                tool_calls=[],
+                invalid_tool_calls=[],
+                raw_stop_reason="stop",
+            ),
+        ]
+    )
+    log = _InMemoryEventLog()
+    kernel = TurnKernel(
+        llm_client=llm,
+        event_writer=CoreEventWriter(log, run_id="run-1"),
+    )
+
+    await kernel.run_turn(_request())
+    await kernel.run_turn(_request())
+
+    stream_events = [
+        event
+        for event in log.events
+        if event.event_type
+        in {
+            CoreEventType.REASONING_DELTA,
+            CoreEventType.TEXT_DELTA,
+            CoreEventType.TOOL_CALL_STARTED,
+            CoreEventType.TOOL_CALL_DELTA,
+            CoreEventType.TOOL_CALL_COMPLETED,
+        }
+    ]
+    assert [event.event_type for event in stream_events] == [
+        CoreEventType.REASONING_DELTA,
+        CoreEventType.TEXT_DELTA,
+        CoreEventType.TEXT_DELTA,
+        CoreEventType.TOOL_CALL_STARTED,
+        CoreEventType.TOOL_CALL_DELTA,
+        CoreEventType.TOOL_CALL_DELTA,
+        CoreEventType.TOOL_CALL_DELTA,
+        CoreEventType.TOOL_CALL_DELTA,
+        CoreEventType.TOOL_CALL_COMPLETED,
+    ]
 
 
 async def test_turn_kernel_awaits_async_tool_executor() -> None:

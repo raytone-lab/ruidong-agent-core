@@ -162,6 +162,16 @@ async def test_openai_compat_llm_client_recovers_partial_error_output() -> None:
     done = next(event for event in events if isinstance(event, TurnDone))
     assert done.stop_reason == "error"
     assert done.text_blocks[0] == TextBlock("partial")
+    assert done.provider_state == {
+        "provider_error": {
+            "adapter_kind": "openai_compat",
+            "transport_kind": "FakeTransport",
+            "error_type": "RuntimeError",
+            "message": "stream failed",
+            "retryable": None,
+            "partial_output_emitted": True,
+        }
+    }
 
 
 async def test_openai_compat_llm_client_uses_model_profile_defaults() -> None:

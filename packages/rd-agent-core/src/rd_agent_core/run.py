@@ -40,6 +40,7 @@ from .policies import (
     repeat_threshold_for_tool,
     tool_call_signature,
     tool_repeat_policy_from_metadata,
+    would_exceed_repeat_threshold,
 )
 from .turn import (
     CoreToolPolicy,
@@ -322,7 +323,11 @@ class _RepeatedToolCallGuard:
         occurrences_including_current = (
             sum(1 for signature in self._signatures if signature == candidate) + 1
         )
-        if occurrences_including_current >= threshold:
+        if would_exceed_repeat_threshold(
+            self._signatures,
+            candidate=candidate,
+            threshold=threshold,
+        ):
             return ToolExecutionResult(
                 ok=False,
                 content="Repeated tool call blocked by run policy.",

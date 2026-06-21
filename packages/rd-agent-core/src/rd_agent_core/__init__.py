@@ -54,6 +54,7 @@ from .policies import (
     repeat_threshold_for_tool,
     tool_call_signature,
     tool_repeat_policy_from_metadata,
+    would_exceed_repeat_threshold,
 )
 from .run import (
     RunKernel,
@@ -163,4 +164,5 @@ __all__ = [
     "summarize_kernel_result",
     "tool_call_signature",
     "tool_repeat_policy_from_metadata",
+    "would_exceed_repeat_threshold",
 ]

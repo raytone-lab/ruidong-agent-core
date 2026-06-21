@@ -327,6 +327,55 @@ async def test_continuation_runner_fails_job_when_engine_state_is_invalid() -> N
     assert persistence.load_run("run-cont-bad-state") is None
 
 
+async def test_continuation_runner_rejects_existing_run_with_wrong_parent() -> None:
+    persistence = InMemoryRunPersistence()
+    event_log = InMemoryEventLog()
+    root = await _create_continuable_root(
+        persistence=persistence,
+        event_log=event_log,
+    )
+    unrelated = persistence.create_root_run(
+        run_id="run-cont-wrong-parent",
+        scope=RunScope(
+            user_request_id="request-1",
+            project_id="project-1",
+        ),
+        budget=RunBudget(
+            max_turns=1,
+            max_tool_calls=1,
+            max_wall_clock_s=30,
+            total_timeout_s=60,
+        ),
+    )
+    queue = InMemoryContinuationQueue()
+    queue.enqueue_for_run(
+        ContinuationJobSpec(
+            user_request_id="request-1",
+            project_id="project-1",
+            previous_run_id=root.completed.run_id,
+            next_run_id=unrelated.run_id,
+            max_attempts=1,
+        ),
+        job_id="job-wrong-parent",
+    )
+    runner = ContinuationRunner(
+        continuation_queue=queue,
+        run_persistence=persistence,
+        event_log=event_log,
+        llm_client=ScriptedLLMClient([]),
+    )
+
+    with pytest.raises(RuntimeError, match="continuation run parent mismatch"):
+        await runner.run_next(ContinuationRunnerRequest(worker_id="worker-1"))
+
+    rejected = persistence.load_run(unrelated.run_id)
+    job = queue.load_job("job-wrong-parent")
+    assert rejected is not None
+    assert rejected.status == RunStatus.PENDING
+    assert job is not None
+    assert job.status == ContinuationJobStatus.DEAD_LETTER
+
+
 async def test_continuation_runner_fails_job_and_run_when_mark_running_fails() -> None:
     persistence = _MarkRunningFailsPersistence()
     event_log = InMemoryEventLog()

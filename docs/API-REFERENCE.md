@@ -411,6 +411,8 @@ RunLimits(
 )
 ```
 
+`repeated_tool_call_threshold` 在 runtime guard 中包含当前 candidate 调用；例如 `threshold=2` 表示第二次相同工具签名会被拦截。公共 helper 中，`has_repeated_tool_call()` 只检查 history 里已有次数，`would_exceed_repeat_threshold()` 检查把当前 candidate 计入后是否达到阈值。
+
 ### `CoreToolPolicy`
 
 ```python
@@ -454,7 +456,7 @@ ToolOutputBlobWriter(blob_writer: BlobWriter, max_inline_chars: int = 8192, mime
 ToolOutputLimiter(max_content_chars: int)
 ```
 
-`ToolInputValidator` 对 declared `ToolDefinition.input_schema` 执行轻量 JSON-schema 校验，失败时返回 `tool_input_invalid` 且不调用 executor。`ToolOutputBlobWriter` 在输出超过阈值时调用 host 提供的 `BlobWriter.write_large_payload()`，把 `BlobRef` 写入 result metadata，并保留可配置 inline 前缀。`ToolOutputLimiter` 截断超长 `ToolExecutionResult.content`，并在 metadata 写入 `output_truncated` 和 `original_content_chars`。
+`ToolInputValidator` 对 declared `ToolDefinition.input_schema` 执行 minimal JSON-schema subset 校验，失败时返回 `tool_input_invalid` 且不调用 executor。当前支持 `type`、`enum`、object `required` / `properties` / `additionalProperties: false`、array `items`；不支持 `minLength`、`maxLength`、`pattern`、`format`、`minimum`、`maximum`、`oneOf`、`anyOf`、`allOf`、`minItems`、`maxItems` 等完整 JSON Schema 关键字。需要完整 schema 语义的 host 应在 executor 或额外 middleware 中使用专门 validator。`ToolOutputBlobWriter` 在输出超过阈值时调用 host 提供的 `BlobWriter.write_large_payload()`，把 `BlobRef` 写入 result metadata，并保留可配置 inline 前缀。`ToolOutputLimiter` 截断超长 `ToolExecutionResult.content`，并在 metadata 写入 `output_truncated` 和 `original_content_chars`。
 
 ### Provider LLM clients
 
@@ -727,6 +729,8 @@ Message(
 ToolCall(tool_use_id: str, tool_name: str, input: dict[str, Any], status: ToolCallStatus)
 ToolResult(tool_use_id: str, ok: bool, content: str, error: dict[str, Any] | None = None)
 ```
+
+`ToolResult.content` 永远是 `str`。大工具输出的 `BlobRef` 不放在 `ToolResult.content` 中；core 会把它写入 `ToolExecutionResult.metadata["blob_ref"]` 以及对应 tool event 的 `result.metadata.blob_ref`。
 
 ### Content blocks
 

@@ -166,10 +166,26 @@ def has_repeated_tool_call(
     candidate: ToolCallSignature,
     threshold: int,
 ) -> bool:
+    """Return true when ``history`` already contains ``threshold`` matches."""
+
     if threshold < 1:
         raise ValueError("threshold must be >= 1")
     repeated = sum(1 for item in history if item == candidate)
     return repeated >= threshold
+
+
+def would_exceed_repeat_threshold(
+    history: Iterable[ToolCallSignature],
+    *,
+    candidate: ToolCallSignature,
+    threshold: int,
+) -> bool:
+    """Return true when adding ``candidate`` would reach the repeat threshold."""
+
+    if threshold < 1:
+        raise ValueError("threshold must be >= 1")
+    repeated = sum(1 for item in history if item == candidate)
+    return repeated + 1 >= threshold
 
 
 def _positive_int(value: Any) -> int | None:

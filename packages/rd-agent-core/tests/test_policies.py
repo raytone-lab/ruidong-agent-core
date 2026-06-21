@@ -8,6 +8,7 @@ from rd_agent_core import (
     repeat_threshold_for_tool,
     tool_call_signature,
     tool_repeat_policy_from_metadata,
+    would_exceed_repeat_threshold,
 )
 
 
@@ -56,6 +57,22 @@ def test_repeated_tool_call_detection_uses_threshold() -> None:
 
     assert has_repeated_tool_call([candidate, other, candidate], candidate=candidate, threshold=2)
     assert not has_repeated_tool_call([candidate, other], candidate=candidate, threshold=2)
+
+
+def test_would_exceed_repeat_threshold_counts_candidate() -> None:
+    candidate = tool_call_signature("read_file", {"path": "README.md"})
+    other = tool_call_signature("read_file", {"path": "pyproject.toml"})
+
+    assert would_exceed_repeat_threshold(
+        [candidate, other],
+        candidate=candidate,
+        threshold=2,
+    )
+    assert not would_exceed_repeat_threshold(
+        [other],
+        candidate=candidate,
+        threshold=2,
+    )
 
 
 def test_tool_repeat_policy_can_disable_repeat_guard_from_metadata() -> None:

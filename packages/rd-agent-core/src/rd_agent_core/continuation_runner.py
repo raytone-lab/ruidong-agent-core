@@ -39,6 +39,14 @@ from .run import RunKernel, RunKernelResult, RunRequest
 from .summary import RunSummary, summarize_failed_run, summarize_kernel_result
 from .turn import CoreToolPolicy, LLMClientPort, ToolExecutorLike
 
+_RESUMABLE_CONTINUATION_STATUSES = frozenset(
+    {
+        RunStatus.PENDING.value,
+        RunStatus.RESUMING.value,
+        RunStatus.RUNNING.value,
+    }
+)
+
 
 @dataclass(frozen=True)
 class ContinuationRunnerRequest:
@@ -273,6 +281,7 @@ class ContinuationRunner:
     ) -> RunRecord:
         existing = self._run_persistence.load_run(job.next_run_id)
         if existing is not None:
+            _validate_existing_continuation_run(existing=existing, previous=previous)
             return existing
         run = self._run_persistence.create_continuation_run(
             previous_run_id=previous.run_id,
@@ -285,6 +294,31 @@ class ContinuationRunner:
             "continuation run could not be created: "
             f"previous_run_id={previous.run_id!r}, next_run_id={job.next_run_id!r}"
         )
+
+
+def _validate_existing_continuation_run(
+    *,
+    existing: RunRecord,
+    previous: RunRecord,
+) -> None:
+    if existing.scope.parent_run_id != previous.run_id:
+        raise RuntimeError("continuation run parent mismatch")
+    if existing.scope.user_request_id != previous.scope.user_request_id:
+        raise RuntimeError("continuation run request mismatch")
+    if existing.scope.project_id != previous.scope.project_id:
+        raise RuntimeError("continuation run project mismatch")
+    if existing.scope.session_id != previous.scope.session_id:
+        raise RuntimeError("continuation run session mismatch")
+    if existing.scope.subagent_task_id != previous.scope.subagent_task_id:
+        raise RuntimeError("continuation run subagent task mismatch")
+    if existing.scope.agent_kind != previous.scope.agent_kind:
+        raise RuntimeError("continuation run agent kind mismatch")
+    if existing.scope.correlation_id != previous.scope.correlation_id:
+        raise RuntimeError("continuation run correlation mismatch")
+    if existing.continuation_index != previous.continuation_index + 1:
+        raise RuntimeError("continuation index mismatch")
+    if str(existing.status) not in _RESUMABLE_CONTINUATION_STATUSES:
+        raise RuntimeError("continuation run status is not resumable")
 
 
 def _resolve_tool_context(

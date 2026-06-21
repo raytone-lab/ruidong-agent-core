@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterable, AsyncIterator, Mapping, Sequence
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from typing import Any, Literal
 
 from rd_agent_contracts import Message, ToolDefinition, ToolResult
@@ -14,7 +14,7 @@ from rd_llm_adapter import (
     OpenAICompatTransport,
 )
 from rd_llm_adapter.base import StreamParserSession, Transport
-from rd_llm_adapter.events import StandardEvent
+from rd_llm_adapter.events import StandardEvent, TurnDone
 
 from .model_profile import ModelProfile, normalize_model_profile
 from .turn import TurnRequest
@@ -87,6 +87,7 @@ class OpenAICompatLLMClient:
             session=session,
             request_body=body,
             config=self.config,
+            adapter_kind="openai_compat",
         ):
             yield event
 
@@ -128,6 +129,7 @@ class AnthropicNativeLLMClient:
             session=session,
             request_body=body,
             config=self.config,
+            adapter_kind="anthropic_native",
         ):
             yield event
 
@@ -138,6 +140,7 @@ async def _stream_with_recovery(
     session: StreamParserSession,
     request_body: dict[str, Any],
     config: ProviderClientConfig,
+    adapter_kind: str,
 ) -> AsyncIterator[StandardEvent]:
     try:
         async for chunk in transport.stream(
@@ -149,16 +152,61 @@ async def _stream_with_recovery(
         ):
             for event in session.feed(chunk):
                 yield event
-    except Exception:
+    except Exception as exc:
         recovered = tuple(session.finalize_on_error())
         if recovered:
-            for event in recovered:
+            provider_error = _provider_error_payload(
+                adapter_kind=adapter_kind,
+                transport=transport,
+                exc=exc,
+                partial_output_emitted=True,
+            )
+            for event in _attach_provider_error(recovered, provider_error):
                 yield event
             return
         raise
     else:
         for event in session.finalize():
             yield event
+
+
+def _provider_error_payload(
+    *,
+    adapter_kind: str,
+    transport: Transport,
+    exc: Exception,
+    partial_output_emitted: bool,
+) -> dict[str, Any]:
+    retryable = getattr(exc, "retryable", None)
+    return {
+        "adapter_kind": adapter_kind,
+        "transport_kind": type(transport).__name__,
+        "error_type": exc.__class__.__name__,
+        "message": str(exc),
+        "retryable": retryable if isinstance(retryable, bool) else None,
+        "partial_output_emitted": partial_output_emitted,
+    }
+
+
+def _attach_provider_error(
+    events: Sequence[StandardEvent],
+    provider_error: Mapping[str, Any],
+) -> tuple[StandardEvent, ...]:
+    recovered: list[StandardEvent] = []
+    for event in events:
+        if isinstance(event, TurnDone):
+            provider_state: dict[str, Any]
+            if isinstance(event.provider_state, Mapping):
+                provider_state = dict(event.provider_state)
+            elif event.provider_state is None:
+                provider_state = {}
+            else:
+                provider_state = {"raw_provider_state": event.provider_state}
+            provider_state["provider_error"] = dict(provider_error)
+            recovered.append(replace(event, provider_state=provider_state))
+        else:
+            recovered.append(event)
+    return tuple(recovered)
 
 
 def _messages_to_adapter_messages(messages: Sequence[Message]) -> list[dict[str, Any]]:

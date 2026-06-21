@@ -46,8 +46,9 @@ class ToolCall:
 class ToolResult:
     """工具执行结果。tool_use_id 必须配对某个 ToolCall.tool_use_id。
 
-    content 可能是 BlobRef（大输出场景，由 P6 executor middleware 决定）；
-    Phase A 仅用 str，Phase B 起 P6 实现 blob 阈值切换。
+    content 永远是 str。大输出场景由 core executor middleware 将 BlobRef
+    放在 ToolExecutionResult.metadata["blob_ref"] 和对应事件 payload 中；
+    transcript 中只保留 inline 内容或 inline 前缀。
     """
 
     tool_use_id: str

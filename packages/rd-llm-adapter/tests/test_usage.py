@@ -32,6 +32,21 @@ def test_normalize_usage_maps_legacy_cached_tokens_to_cache_read() -> None:
     assert usage.cached_input_tokens == 4
 
 
+def test_normalize_usage_does_not_double_count_overlapping_input_details() -> None:
+    usage = normalize_usage(
+        {
+            "prompt_tokens": 10,
+            "completion_tokens": 5,
+            "prompt_tokens_details": {"cached_tokens": 10},
+            "input_tokens_details": {"cached_tokens": 10},
+        }
+    )
+
+    assert usage.cache_read_input_tokens == 10
+    assert usage.cache_creation_input_tokens == 0
+    assert usage.cached_input_tokens == 10
+
+
 def test_usage_record_add_computes_total_from_component_tokens() -> None:
     usage = UsageRecord(input_tokens=10, output_tokens=5, total_tokens=15) + UsageRecord(
         input_tokens=4,

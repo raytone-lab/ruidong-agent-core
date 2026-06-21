@@ -157,19 +157,33 @@ def normalize_usage(raw: Any) -> UsageRecord:
     cache_read_input_tokens = mapped.get("cache_read_input_tokens", 0)
     cache_creation_input_tokens = mapped.get("cache_creation_input_tokens", 0)
     reasoning_tokens = mapped.get("reasoning_tokens", 0)
-    for detail_key in ("prompt_tokens_details", "input_tokens_details"):
-        detail = raw.get(detail_key)
-        cache_read_input_tokens += _sum_detail_values(
-            detail,
+    input_detail = _select_overlapping_detail(
+        legacy_detail=raw.get("prompt_tokens_details"),
+        canonical_detail=raw.get("input_tokens_details"),
+        legacy_name="prompt_tokens_details",
+        canonical_name="input_tokens_details",
+        groups=(
             _CACHE_READ_INPUT_DETAIL_KEYS,
-        )
-        cache_creation_input_tokens += _sum_detail_values(
-            detail,
             _CACHE_CREATION_INPUT_DETAIL_KEYS,
-        )
-    for detail_key in ("completion_tokens_details", "output_tokens_details"):
-        detail = raw.get(detail_key)
-        reasoning_tokens += _sum_detail_values(detail, _REASONING_DETAIL_KEYS)
+        ),
+    )
+    cache_read_input_tokens += _sum_detail_values(
+        input_detail,
+        _CACHE_READ_INPUT_DETAIL_KEYS,
+    )
+    cache_creation_input_tokens += _sum_detail_values(
+        input_detail,
+        _CACHE_CREATION_INPUT_DETAIL_KEYS,
+    )
+
+    output_detail = _select_overlapping_detail(
+        legacy_detail=raw.get("completion_tokens_details"),
+        canonical_detail=raw.get("output_tokens_details"),
+        legacy_name="completion_tokens_details",
+        canonical_name="output_tokens_details",
+        groups=(_REASONING_DETAIL_KEYS,),
+    )
+    reasoning_tokens += _sum_detail_values(output_detail, _REASONING_DETAIL_KEYS)
 
     inp = mapped.get("input_tokens", 0)
     out = mapped.get("output_tokens", 0)
@@ -217,3 +231,38 @@ def _sum_detail_values(detail: Any, keys: tuple[str, ...]) -> int:
         if value_int is not None:
             total += value_int
     return total
+
+
+def _select_overlapping_detail(
+    *,
+    legacy_detail: Any,
+    canonical_detail: Any,
+    legacy_name: str,
+    canonical_name: str,
+    groups: tuple[tuple[str, ...], ...],
+) -> Any:
+    canonical_signature = _detail_signature(canonical_detail, groups)
+    legacy_signature = _detail_signature(legacy_detail, groups)
+    has_canonical = any(canonical_signature)
+    has_legacy = any(legacy_signature)
+    if has_canonical and has_legacy:
+        if canonical_signature != legacy_signature:
+            logger.warning(
+                "Usage normalization got both %s=%s and %s=%s; using %s",
+                legacy_name,
+                legacy_signature,
+                canonical_name,
+                canonical_signature,
+                canonical_name,
+            )
+        return canonical_detail
+    if has_canonical:
+        return canonical_detail
+    return legacy_detail
+
+
+def _detail_signature(
+    detail: Any,
+    groups: tuple[tuple[str, ...], ...],
+) -> tuple[int, ...]:
+    return tuple(_sum_detail_values(detail, group) for group in groups)

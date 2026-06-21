@@ -244,6 +244,54 @@ class TurnKernelResult:
         return self.tool_call_counts.denied
 
 
+@dataclass
+class _StandardEventIdempotencyState:
+    text_delta_counts: dict[int, int] = field(default_factory=dict)
+    reasoning_delta_counts: dict[int, int] = field(default_factory=dict)
+    tool_call_id_delta_counts: dict[int, int] = field(default_factory=dict)
+    tool_call_name_delta_counts: dict[int, int] = field(default_factory=dict)
+    tool_call_args_delta_counts: dict[int, int] = field(default_factory=dict)
+
+    def key_for(
+        self,
+        *,
+        turn_id: str,
+        event: StandardEvent,
+        usage_update_index: int | None = None,
+    ) -> str | None:
+        if isinstance(event, TextDelta):
+            delta_index = self._next(self.text_delta_counts, event.block_index)
+            return f"{turn_id}:text_delta:{event.block_index}:{delta_index}"
+        if isinstance(event, ReasoningDelta):
+            delta_index = self._next(
+                self.reasoning_delta_counts,
+                event.block_index,
+            )
+            return f"{turn_id}:reasoning_delta:{event.block_index}:{delta_index}"
+        if isinstance(event, ToolCallStart):
+            return f"{turn_id}:tool_call:{event.index}:started"
+        if isinstance(event, ToolCallIdDelta):
+            delta_index = self._next(self.tool_call_id_delta_counts, event.index)
+            return f"{turn_id}:tool_call:{event.index}:id_delta:{delta_index}"
+        if isinstance(event, ToolCallNameDelta):
+            delta_index = self._next(self.tool_call_name_delta_counts, event.index)
+            return f"{turn_id}:tool_call:{event.index}:name_delta:{delta_index}"
+        if isinstance(event, ToolCallArgsDelta):
+            delta_index = self._next(self.tool_call_args_delta_counts, event.index)
+            return f"{turn_id}:tool_call:{event.index}:args_delta:{delta_index}"
+        if isinstance(event, ToolCallEnd):
+            return f"{turn_id}:tool_call:{event.index}:completed"
+        if isinstance(event, UsageUpdate) and usage_update_index is not None:
+            return f"{turn_id}:usage:{usage_update_index}"
+        return None
+
+    @staticmethod
+    def _next(counts: dict[int, int], key: int) -> int:
+        count = counts.get(key, 0) + 1
+        counts[key] = count
+        return count
+
+
 class LLMClientPort(Protocol):
     def stream_turn(self, request: TurnRequest) -> AsyncIterable[StandardEvent]: ...
 
@@ -295,6 +343,7 @@ class TurnKernel:
         turn_done: TurnDone | None = None
         last_usage_update: UsageUpdate | None = None
         usage_update_index = 0
+        event_idempotency = _StandardEventIdempotencyState()
         cancelled = _is_cancelled(request.cancellation_token)
 
         if not cancelled:
@@ -306,12 +355,21 @@ class TurnKernel:
                         writer,
                         event,
                         usage_update_index=usage_update_index,
+                        event_idempotency=event_idempotency,
                     )
                 elif isinstance(event, TurnDone):
                     turn_done = event
-                    emitted = self._emit_standard_event(writer, event)
+                    emitted = self._emit_standard_event(
+                        writer,
+                        event,
+                        event_idempotency=event_idempotency,
+                    )
                 else:
-                    emitted = self._emit_standard_event(writer, event)
+                    emitted = self._emit_standard_event(
+                        writer,
+                        event,
+                        event_idempotency=event_idempotency,
+                    )
                 if emitted is not None:
                     events.append(emitted)
                 if _is_cancelled(request.cancellation_token):
@@ -521,11 +579,16 @@ class TurnKernel:
         event: StandardEvent,
         *,
         usage_update_index: int | None = None,
+        event_idempotency: _StandardEventIdempotencyState,
     ) -> AgentEvent | None:
         if isinstance(event, TextDelta):
             return writer.append(
                 CoreEventType.TEXT_DELTA,
                 {"text": event.text, "block_index": event.block_index},
+                idempotency_key=event_idempotency.key_for(
+                    turn_id=writer.turn_id,
+                    event=event,
+                ),
             )
         if isinstance(event, ReasoningDelta):
             return writer.append(
@@ -535,21 +598,37 @@ class TurnKernel:
                     "block_index": event.block_index,
                     "provider_data": event.provider_data,
                 },
+                idempotency_key=event_idempotency.key_for(
+                    turn_id=writer.turn_id,
+                    event=event,
+                ),
             )
         if isinstance(event, ToolCallStart):
             return writer.append(
                 CoreEventType.TOOL_CALL_STARTED,
                 _dataclass_payload(event),
+                idempotency_key=event_idempotency.key_for(
+                    turn_id=writer.turn_id,
+                    event=event,
+                ),
             )
         if isinstance(event, ToolCallIdDelta | ToolCallNameDelta | ToolCallArgsDelta):
             return writer.append(
                 CoreEventType.TOOL_CALL_DELTA,
                 _dataclass_payload(event),
+                idempotency_key=event_idempotency.key_for(
+                    turn_id=writer.turn_id,
+                    event=event,
+                ),
             )
         if isinstance(event, ToolCallEnd):
             return writer.append(
                 CoreEventType.TOOL_CALL_COMPLETED,
                 _dataclass_payload(event),
+                idempotency_key=event_idempotency.key_for(
+                    turn_id=writer.turn_id,
+                    event=event,
+                ),
             )
         if isinstance(event, UsageUpdate):
             payload = event.to_dict()
@@ -558,10 +637,10 @@ class TurnKernel:
             return writer.append(
                 CoreEventType.USAGE_UPDATE,
                 payload,
-                idempotency_key=(
-                    f"{writer.turn_id}:usage:{usage_update_index}"
-                    if usage_update_index is not None
-                    else None
+                idempotency_key=event_idempotency.key_for(
+                    turn_id=writer.turn_id,
+                    event=event,
+                    usage_update_index=usage_update_index,
                 ),
             )
         return None
